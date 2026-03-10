@@ -8,26 +8,33 @@ AEShield là nền tảng quản lý và chia sẻ file an toàn với mã hóa 
 
 ```
 aeshield/
-├── backend/                    # Go + Wails
-│   ├── cmd/                    # Điểm khởi đầu
-│   │   └── main.go
-│   ├── internal/               # Logic nghiệp vụ
-│   │   ├── auth/               # Xử lý xác thực
-│   │   ├── encrypt/            # Logic mã hóa
-│   │   ├── storage/           # Tích hợp Cloudflare R2
-│   │   └── middleware/        # JWT, CORS, v.v.
-│   ├── models/                 # Schema MongoDB
-│   │   └── file.go
-│   ├── frontend/               # Frontend (Wails embed)
-│   │   ├── src/                # React
-│   │   ├── package.json
-│   │   └── vite.config.ts
-│   ├── go.mod
-│   └── Makefile
-├── specs/
+├── main.go                # Wails entry point (root required)
+├── app.go                 # Wails app struct
+├── go.mod                 # Go modules
+├── wails.json             # Wails config
+├── Makefile               # Build commands
+├── app/                   # Business logic (optional organization)
+│   └── internal/          # Logic nghiệp vụ
+│       ├── auth/          # Xử lý xác thực
+│       ├── encrypt/       # Logic mã hóa
+│       ├── storage/       # Tích hợp Cloudflare R2
+│       └── middleware/    # JWT, CORS, v.v.
+├── models/                # MongoDB schemas (root level)
+│   └── file.go
+├── frontend/              # React (Wails embed)
+│   ├── src/
+│   │   ├── components/   # React components
+│   │   ├── hooks/        # Custom React hooks
+│   │   ├── lib/          # API & Crypto wrappers
+│   │   └── ...
+│   ├── package.json
+│   └── vite.config.ts
+├── specs/                 # Specification files
 │   └── *.md
-└── AGENTS.md
+└── AGENTS.md              # Coding rules
 ```
+
+**Lưu ý:** Wails yêu cầu `main.go` và `app.go` ở root. Các thư mục business logic có thể đặt trong `app/internal/` hoặc trực tiếp ở root.
 
 ## Công nghệ Sử dụng
 
@@ -53,15 +60,17 @@ aeshield/
 wails dev
 
 # Build production
-wails build -platform=darwin-arm64   # macOS ARM
-wails build -platform=darwin-amd64   # macOS Intel
-wails build -platform=windows-amd64  # Windows
+wails build -platform=darwin/arm64   # macOS ARM
+wails build -platform=darwin/amd64  # macOS Intel
+wails build -platform=windows/amd64 # Windows
 
 # Build tất cả platforms
 wails build
 ```
 
-## Wails Configuration (wails.json)
+## Wails Configuration
+
+Tạo file `wails.json` ở root:
 
 ```json
 {
@@ -73,7 +82,7 @@ wails build
   "author": {
     "name": "AEShield Team"
   },
-  "version": "1.0.0",
+  "version": "0.0.1",
   "wailsjsdir": "./frontend/src"
 }
 ```
