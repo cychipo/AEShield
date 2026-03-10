@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+
+<html lang="vi"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Điều khoản dịch vụ - AEShield</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#f6831e",
+                        "background-light": "#f9f7f2",
+                        "background-dark": "#221810",
+                        "surface": "#ffffff",
+                        "charcoal": "#3e3935",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark min-h-screen font-display">
+<div class="max-w-4xl mx-auto px-6 py-12">
+<!-- Header -->
+<div class="flex items-center gap-3 mb-8">
+<a href="auth-login.html" class="flex items-center gap-2 text-charcoal/60 dark:text-slate-400 hover:text-primary transition-colors">
+<span class="material-symbols-outlined">arrow_back</span>
+<span class="text-sm">Quay lại đăng nhập</span>
+</a>
+</div>
+
+<!-- Brand -->
+<div class="flex flex-col items-center mb-10">
+<div class="bg-primary/10 p-3 rounded-xl mb-4">
+<span class="material-symbols-outlined text-primary text-4xl" style="font-variation-settings: 'FILL' 1">
+                    shield_lock
+                </span>
+</div>
+<h1 class="text-2xl font-bold text-charcoal dark:text-slate-100">Điều khoản dịch vụ & Bảo mật</h1>
+</div>
+
+<!-- Content -->
+<div class="bg-surface dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm p-8">
+<div class="prose prose-slate dark:prose-invert max-w-none space-y-8">
+
+<!-- Section 1 -->
+<div>
+<h2 class="text-lg font-semibold text-charcoal dark:text-slate-100 mb-3">1. Chấp nhận điều khoản</h2>
+<p class="text-charcoal/70 dark:text-slate-400 text-sm leading-relaxed">
+Bằng việc truy cập và sử dụng AEShield, bạn đồng ý bị ràng buộc bởi các điều khoản dịch vụ này. Nếu bạn không đồng ý với bất kỳ điều khoản nào, vui lòng không sử dụng dịch vụ.
+            </p>
+</div>
+
+<!-- Section 2 -->
+<div>
+<h2 class="text-lg font-semibold text-charcoal dark:text-slate-100 mb-3">2. Bảo mật & Mã hóa</h2>
+<p class="text-charcoal/70 dark:text-slate-400 text-sm leading-relaxed">
+AEShield sử dụng mã hóa AES-GCM 256-bit để bảo vệ file của bạn. Tất cả dữ liệu được mã hóa phía client trước khi tải lên Cloudflare R2. Chúng tôi không lưu trữ khóa mã hóa của bạn - bạn hoàn toàn kiểm soát quyền truy cập file của mình.
+            </p>
+</div>
+
+<!-- Section 3 -->
+<div>
+<h2 class="text-lg font-semibold text-charcoal dark:text-slate-100 mb-3">3. Quyền riêng tư</h2>
+<p class="text-charcoal/70 dark:text-slate-400 text-sm leading-relaxed">
+Chúng tôi tôn trọng quyền riêng tư của bạn. Thông tin cá nhân chỉ được sử dụng để cung cấp dịch vụ. Dữ liệu của bạn được lưu trữ với mã hóa và chỉ bạn mới có thể truy cập trừ khi bạn chia sẻ quyền.
+            </p>
+</div>
+
+<!-- Section 4 -->
+<div>
+<h2 class="text-lg font-semibold text-charcoal dark:text-slate-100 mb-3">4. Giới hạn trách nhiệm</h2>
+<p class="text-charcoal/70 dark:text-slate-400 text-sm leading-relaxed">
+AEShield cung cấp dịch vụ "như hiện tại". Chúng tôi không chịu trách nhiệm cho bất kỳ mất mát dữ liệu nào xảy ra do sử dụng dịch vụ. Bạn có trách nhiệm sao lưu dữ liệu quan trọng.
+            </p>
+</div>
+
+<!-- Section 5 -->
+<div>
+<h2 class="text-lg font-semibold text-charcoal dark:text-slate-100 mb-3">5. Liên hệ</h2>
+<p class="text-charcoal/70 dark:text-slate--relaxed">
+Nếu có câu hỏi nào về điều khoản dịch vụ, vui lòng liên hệ qua email: zsoft.co04@gmail.com
+            </p>
+</div>
+
+</div>
+
+<!-- Footer -->
+<div class="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800 text-center">
+<p class="text-charcoal/40 dark:text-slate-600 text-xs">
+Cập nhật lần cuối: Tháng 3/2026
+            </p>
+</div>
+</div>
+</div>
+</body></html>

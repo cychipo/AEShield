@@ -26,14 +26,21 @@ type Claims struct {
 }
 ```
 
-## Các Endpoint
+## Các Endpoint (base path: /api/v1)
 
-| Method | Endpoint      | Mô tả                            |
-| ------ | ------------- | -------------------------------- |
-| POST   | /auth/google | Đổi mã Google lấy JWT           |
-| POST   | /auth/github | Đổi mã GitHub lấy JWT           |
+| Method | Endpoint     | Mô tả                 |
+| ------ | ------------ | --------------------- |
+| POST   | /auth/google | Đổi mã Google lấy JWT |
+| POST   | /auth/github | Đổi mã GitHub lấy JWT |
 
 ## Lưu trữ Token
 
 - JWT được lưu ở Frontend (localStorage hoặc httpOnly cookie)
 - Gửi trong header `Authorization: Bearer <token>` cho các yêu cầu được bảo vệ
+
+## File Mockup cho spec này:
+
+```
+/mockups/auth-login.html
+/mockups/terms-of-service.html
+```
