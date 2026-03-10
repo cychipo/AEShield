@@ -1,19 +1,84 @@
-# README
+# AEShield
 
-## About
+Secure file management and sharing platform with client-side AES encryption before uploading to Cloudflare R2.
 
-This is the official Wails React template.
+## Features
 
-You can configure the project by editing `wails.json`. More information about the project settings can be found
-here: https://wails.io/docs/reference/project-config
+- **Client-side Encryption**: Files are encrypted locally using AES-GCM (128/192/256-bit keys) before upload
+- **Secure Storage**: Cloudflare R2 for object storage
+- **Flexible Access Control**: Public, Private, and Whitelist modes
+- **Cross-platform**: macOS, Windows, Linux support via Wails
 
-## Live Development
+## Tech Stack
 
-To run in live development mode, run `wails dev` in the project directory. This will run a Vite development
-server that will provide very fast hot reload of your frontend changes. If you want to develop in a browser
-and have access to your Go methods, there is also a dev server that runs on http://localhost:34115. Connect
-to this in your browser, and you can call your Go code from devtools.
+- **Frontend**: React + Vite
+- **Backend**: Go (Wails)
+- **Encryption**: AES-GCM with Argon2id key derivation
+- **Storage**: Cloudflare R2
 
-## Building
+## Getting Started
 
-To build a redistributable, production mode package, use `wails build`.
+### Prerequisites
+
+- Go 1.21+
+- Node.js 18+
+- Yarn
+
+### Installation
+
+```bash
+# Install dependencies
+make install
+# or
+cd frontend && yarn install
+```
+
+### Development
+
+```bash
+make dev
+# or
+wails dev
+```
+
+### Build
+
+```bash
+# Build for current platform
+wails build
+
+# Build for specific platform
+make build:mac    # macOS (ARM + Intel)
+make build:win    # Windows
+make build:linux  # Linux
+```
+
+## Project Structure
+
+```
+aeshield/
+├── main.go           # Entry point
+├── app.go            # App struct
+├── models/           # MongoDB schemas
+├── frontend/         # React frontend
+│   └── src/
+│       ├── components/
+│       ├── hooks/
+│       └── lib/
+├── Makefile
+└── wails.json
+```
+
+## API Endpoints (Backend)
+
+| Method   | Endpoint                | Description                    |
+| -------- | ----------------------- | ------------------------------ |
+| `POST`   | `/auth/google`          | Google OAuth login             |
+| `POST`   | `/files/encrypt-upload`| Encrypt & upload to R2        |
+| `GET`    | `/files/download/:id`   | Download file (check access)   |
+| `PATCH`  | `/files/share`          | Update access mode             |
+| `DELETE` | `/files/:id`            | Delete file                    |
+
+## License
+
+MIT
