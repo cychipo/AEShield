@@ -28,7 +28,9 @@ Local (Desktop App): gọi trực tiếp qua Go backend hoặc HTTP requests
   "user": {
     "id": "user_123",
     "email": "user@example.com",
-    "provider": "google"
+    "provider": "google",
+    "avatar": "https://example.com/avatar.jpg",
+    "name": "John Doe"
   }
 }
 ```
