@@ -15,6 +15,8 @@ type User struct {
     Provider    string             `bson:"provider"`      // "google" hoặc "github"
     ProviderID  string             `bson:"provider_id"`   // ID từ OAuth provider
     Email       string             `bson:"email"`
+    Avatar      string             `bson:"avatar"`
+    Name        string             `bson:"name"`
     CreatedAt   time.Time          `bson:"created_at"`
     UpdatedAt   time.Time          `bson:"updated_at"`
 }

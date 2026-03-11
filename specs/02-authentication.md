@@ -23,6 +23,8 @@ type Claims struct {
     Email     string `json:"email"`
     Provider  string `json:"provider"` // "google" hoặc "github"
     ExpiresAt int64  `json:"exp"`
+    Avatar    string `json:"avatar"`
+    Name      string `json:"name"`
 }
 ```
 
@@ -35,7 +37,7 @@ type Claims struct {
 
 ## Lưu trữ Token
 
-- JWT được lưu ở Frontend (localStorage hoặc httpOnly cookie)
+- JWT được lưu ở Frontend (localStorage)
 - Gửi trong header `Authorization: Bearer <token>` cho các yêu cầu được bảo vệ
 
 ## File Mockup cho spec này:
