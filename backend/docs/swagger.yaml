@@ -1,0 +1,174 @@
+basePath: /api/v1
+definitions:
+  models.Claims:
+    properties:
+      avatar:
+        type: string
+      email:
+        type: string
+      exp:
+        type: integer
+      name:
+        type: string
+      provider:
+        type: string
+      user_id:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@aeshield.io
+    name: API Support
+    url: http://localhost:8080/support
+  description: Secure file storage API with client-side encryption
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://localhost:8080/terms
+  title: AEShield API
+  version: "1.0"
+paths:
+  /auth/github:
+    get:
+      consumes:
+      - application/json
+      description: Redirect to GitHub OAuth authorization page
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: GitHub OAuth Login
+      tags:
+      - auth
+  /auth/github/callback:
+    get:
+      consumes:
+      - application/json
+      description: Exchange GitHub authorization code for JWT token
+      parameters:
+      - description: Authorization code
+        in: query
+        name: code
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: GitHub OAuth Callback
+      tags:
+      - auth
+  /auth/google:
+    get:
+      consumes:
+      - application/json
+      description: Redirect to Google OAuth authorization page
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Google OAuth Login
+      tags:
+      - auth
+  /auth/google/callback:
+    get:
+      consumes:
+      - application/json
+      description: Exchange Google authorization code for JWT token
+      parameters:
+      - description: Authorization code
+        in: query
+        name: code
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Google OAuth Callback
+      tags:
+      - auth
+  /auth/me:
+    get:
+      consumes:
+      - application/json
+      description: Get authenticated user information
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Claims'
+      security:
+      - BearerAuth: []
+      summary: Get Current User
+      tags:
+      - auth
+  /auth/urls:
+    get:
+      consumes:
+      - application/json
+      description: Get Google and GitHub OAuth authorization URLs
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get OAuth URLs
+      tags:
+      - auth
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer" followed by a space and JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
