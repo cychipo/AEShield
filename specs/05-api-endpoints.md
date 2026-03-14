@@ -3,150 +3,160 @@
 ## Base URL
 
 ```
-Development: http://localhost:8080/api/v1
+Development: http://localhost:3000/api/v1
 Production:  https://api.aeshield.com/api/v1
-
-Local (Desktop App): gọi trực tiếp qua Go backend hoặc HTTP requests
 ```
 
-## Các Endpoint Xác thực
+---
 
-### POST /auth/google
-Đổi mã OAuth2 Google lấy JWT.
+## Xác thực
 
-**Request:**
+### GET /auth/urls
+Trả về URL OAuth2 để frontend redirect người dùng.
+
+**Response:**
 ```json
 {
-  "code": "string"
+  "google": "https://accounts.google.com/o/oauth2/auth?...",
+  "github": "https://github.com/login/oauth/authorize?..."
 }
 ```
+
+### GET /auth/google
+Redirect trình duyệt đến trang đăng nhập Google.
+
+### GET /auth/google/callback
+Đổi Authorization Code lấy JWT. Được gọi từ HTML trung gian (không phải redirect trực tiếp).
+
+**Query params:** `?code=<authorization_code>`
 
 **Response:**
 ```json
 {
   "token": "eyJhbGc...",
   "user": {
-    "id": "user_123",
+    "id": "507f1f77bcf86cd799439011",
     "email": "user@example.com",
-    "provider": "google",
-    "avatar": "https://example.com/avatar.jpg",
-    "name": "John Doe"
+    "name": "John Doe",
+    "avatar": "https://example.com/avatar.jpg"
   }
 }
 ```
 
-### POST /auth/github
-Đổi mã OAuth2 GitHub lấy JWT.
+### GET /auth/github
+Redirect trình duyệt đến trang đăng nhập GitHub.
 
-**Request:**
-```json
-{
-  "code": "string"
-}
-```
+### GET /auth/github/callback
+Giống Google callback.
 
-**Response:** Giống như endpoint Google.
+### GET /auth/me _(JWT required)_
+Lấy thông tin user hiện tại.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response:** `{ user }` object
 
 ---
 
-## Các Endpoint File
+## File
 
-### POST /files/encrypt-upload
-Stream file đã mã hóa lên Cloudflare R2.
+Tất cả endpoints dưới đây yêu cầu `Authorization: Bearer <token>`.
 
-**Headers:**
-```
-Authorization: Bearer <jwt>
-Content-Type: application/octet-stream
-X-Filename: document.pdf
-X-Encryption-Type: AES-256
-```
+### POST /files/upload
+Stream mã hóa file và lưu lên Cloudflare R2.
 
-**Request Body:** File stream đã mã hóa
+**Content-Type:** `multipart/form-data`
 
-**Response:**
+| Field | Type | Bắt buộc | Mô tả |
+|-------|------|----------|-------|
+| `file` | file | Có | File cần upload |
+| `password` | string | Có | Mật khẩu dùng để mã hóa |
+| `encryption_type` | string | Không | `AES-128` / `AES-192` / `AES-256` (mặc định: `AES-256`) |
+| `access_mode` | string | Không | `public` / `private` / `whitelist` (mặc định: `private`) |
+
+**Response `201`:**
 ```json
 {
-  "file_id": "507f1f77bcf86cd799439011",
+  "id": "507f1f77bcf86cd799439011",
+  "owner_id": "user_123",
   "filename": "document.pdf",
   "size": 1048576,
   "encryption_type": "AES-256",
+  "storage_path": "user_123/550e8400-e29b-41d4-a716-446655440000.pdf",
   "access_mode": "private",
-  "created_at": "2026-03-10T12:00:00Z"
+  "whitelist": [],
+  "public_cid": "",
+  "created_at": "2026-03-15T10:00:00Z",
+  "updated_at": "2026-03-15T10:00:00Z"
 }
 ```
 
-### GET /files/download/:id
-Lấy presigned URL để tải file (kiểm tra quyền).
+---
 
-**Headers:**
-```
-Authorization: Bearer <jwt>
-```
+### GET /files
+Lấy danh sách file của user hiện tại.
 
-**Response:**
+**Response `200`:** Mảng `FileMetadata[]`
+
+---
+
+### GET /files/:id/download
+Kiểm tra quyền truy cập và trả về presigned URL để tải file.
+
+**Response `200`:**
 ```json
 {
-  "download_url": "https://r2-bucket.r2.cloudflarestorage.com/...",
-  "expires_in": 3600
+  "url": "https://<account>.r2.cloudflarestorage.com/...?X-Amz-Signature=..."
 }
 ```
 
-### PATCH /files/share
-Cập nhật chế độ truy cập hoặc whitelist của file.
+**Lỗi:**
+- `403` — không có quyền
+- `404` — file không tồn tại
 
-**Headers:**
-```
-Authorization: Bearer <jwt>
-```
+---
+
+### PATCH /files/share
+Cập nhật chế độ chia sẻ hoặc whitelist của file. Chỉ owner mới được phép.
 
 **Request:**
 ```json
 {
   "file_id": "507f1f77bcf86cd799439011",
   "access_mode": "whitelist",
-  "whitelist": ["user1@example.com", "user2@example.com"]
+  "whitelist": ["alice@example.com", "bob@example.com"]
 }
 ```
 
-**Response:**
-```json
-{
-  "success": true,
-  "file_id": "507f1f77bcf86cd799439011"
-}
-```
+**Response `200`:** `FileMetadata` đã cập nhật
+
+**Lỗi:**
+- `400` — `file_id` thiếu hoặc `access_mode` không hợp lệ
+- `403` — không phải owner
+- `404` — file không tồn tại
+
+---
 
 ### DELETE /files/:id
-Xóa file khỏi R2 và metadata khỏi MongoDB.
+Xóa file trên R2 và metadata trong MongoDB. Chỉ owner.
 
-**Headers:**
-```
-Authorization: Bearer <jwt>
-```
-
-**Response:**
+**Response `200`:**
 ```json
-{
-  "success": true
-}
+{ "message": "deleted" }
 ```
 
 ---
 
-## Response Lỗi
+## Response Lỗi Chuẩn
 
 ```json
-{
-  "error": "error_message",
-  "code": "ERROR_CODE"
-}
+{ "error": "mô tả lỗi" }
 ```
 
-Các mã trạng thái phổ biến:
-- `200 OK` - Thành công
-- `400 Bad Request` - Input không hợp lệ
-- `401 Unauthorized` - JWT thiếu/không hợp lệ
-- `403 Forbidden` - Truy cập bị từ chối
-- `404 Not Found` - File không tìm thấy
-- `500 Internal Server Error` - Lỗi server
+| Status | Ý nghĩa |
+|--------|---------|
+| `400` | Input không hợp lệ |
+| `401` | JWT thiếu hoặc không hợp lệ |
+| `403` | Không có quyền truy cập |
+| `404` | Tài nguyên không tìm thấy |
+| `500` | Lỗi server nội bộ |

@@ -2,87 +2,95 @@
 
 ## Tổng quan
 
-AEShield là nền tảng quản lý và chia sẻ file an toàn với mã hóa phía client trước khi tải lên Cloudflare R2.
+AEShield là nền tảng web quản lý và chia sẻ file an toàn. File được mã hóa **server-side** bằng AES-GCM streaming trước khi lưu lên Cloudflare R2. Người dùng đăng nhập qua OAuth2 (Google / GitHub).
 
-## Cấu trúc Thư mục
+## Cấu trúc Thư mục (Monorepo)
 
 ```
 aeshield/
-├── main.go                # Wails entry point (root required)
-├── app.go                 # Wails app struct
-├── go.mod                 # Go modules
-├── wails.json             # Wails config
-├── Makefile               # Build commands
-├── app/                   # Business logic (optional organization)
-│   └── internal/          # Logic nghiệp vụ
-│       ├── auth/          # Xử lý xác thực
-│       ├── encrypt/       # Logic mã hóa
-│       ├── storage/       # Tích hợp Cloudflare R2
-│       └── middleware/    # JWT, CORS, v.v.
-├── models/                # MongoDB schemas (root level)
-│   └── file.go
-├── frontend/              # React (Wails embed)
+├── backend/                   # Go (Fiber v2)
+│   ├── cmd/
+│   │   └── main.go            # Entry point, route registration
+│   ├── internal/
+│   │   ├── auth/              # OAuth2 + JWT (service, handlers, middleware)
+│   │   ├── config/            # Cấu hình từ .env
+│   │   ├── crypto/            # AES-GCM streaming encryption (Argon2id key derive)
+│   │   ├── database/          # MongoDB connection + user repository
+│   │   ├── files/             # Upload / Download / Delete / Share (service + handler)
+│   │   └── storage/           # R2 client + file metadata repository
+│   ├── models/                # MongoDB schemas (User, FileMetadata, Claims)
+│   ├── docs/                  # Swagger / OpenAPI generated files
+│   ├── e2e/                   # End-to-end tests
+│   ├── go.mod
+│   ├── Makefile
+│   └── .env.example
+├── frontend/                  # React + Vite + TypeScript
 │   ├── src/
-│   │   ├── components/   # React components
-│   │   ├── hooks/        # Custom React hooks
-│   │   ├── lib/          # API & Crypto wrappers
-│   │   └── ...
+│   │   ├── components/        # PascalCase UI components
+│   │   ├── hooks/             # Custom React hooks
+│   │   ├── lib/               # API client & helpers
+│   │   └── pages/             # Route-level page components
 │   ├── package.json
-│   └── vite.config.ts
-├── specs/                 # Specification files
+│   ├── vite.config.ts
+│   └── yarn.lock
+├── specs/                     # Tài liệu đặc tả
 │   └── *.md
-└── AGENTS.md              # Coding rules
+├── AGENTS.md                  # Quy tắc coding
+└── README.md
 ```
-
-**Lưu ý:** Wails yêu cầu `main.go` và `app.go` ở root. Các thư mục business logic có thể đặt trong `app/internal/` hoặc trực tiếp ở root.
 
 ## Công nghệ Sử dụng
 
-- **Framework:** Wails (Go + WebView)
-- **Frontend:** React
-- **Backend:** Go (Gin/Fiber middleware)
-- **Database:** MongoDB
-- **Storage:** Cloudflare R2
-- **Quản lý package:** Yarn (FE), Go modules (BE)
+| Layer | Công nghệ |
+|-------|-----------|
+| Backend framework | Go + Fiber v2 |
+| Authentication | OAuth2 (Google, GitHub) + JWT |
+| Encryption | AES-GCM + Argon2id (server-side streaming) |
+| Database | MongoDB |
+| Object storage | Cloudflare R2 (AWS S3-compatible API) |
+| Frontend | React + Vite + TypeScript |
+| Package manager (FE) | Yarn |
 
-## Build Targets
+## Lệnh Vận hành
 
-| Nền tảng | Output                                         |
-| -------- | ---------------------------------------------- |
-| macOS    | `.app` (darwin-arm64, darwin-amd64)            |
-| Windows  | `.exe` (windows-amd64)                         |
-| Linux    | `.AppImage`, `.deb` (linux-arm64, linux-amd64) |
-
-## Lệnh Build
+### Backend (Go)
 
 ```bash
-# Development
-wails dev
+# Chạy dev
+go run cmd/main.go
+
+# Lint
+golangci-lint run
+
+# Test
+go test ./...
+
+# Build
+go build -o server cmd/main.go
+```
+
+### Frontend (React)
+
+```bash
+# Cài đặt
+yarn install
+
+# Chạy dev
+yarn dev
+
+# Lint & typecheck
+yarn lint
+yarn typecheck
 
 # Build production
-wails build -platform=darwin/arm64   # macOS ARM
-wails build -platform=darwin/amd64  # macOS Intel
-wails build -platform=windows/amd64 # Windows
-
-# Build tất cả platforms
-wails build
+yarn build
 ```
 
-## Wails Configuration
+## Cổng Mặc định
 
-Tạo file `wails.json` ở root:
+| Service | Port |
+|---------|------|
+| Backend API | `3000` |
+| Frontend dev server | `5173` (Vite) |
 
-```json
-{
-  "name": "AEShield",
-  "outputfilename": "AEShield",
-  "frontend:install": "yarn install",
-  "frontend:build": "yarn build",
-  "frontend:dev:watcher": "yarn dev",
-  "author": {
-    "name": "AEShield Team"
-  },
-  "version": "0.0.1",
-  "wailsjsdir": "./frontend/src"
-}
-```
+Frontend production được serve bởi backend từ thư mục `frontend/dist/`.

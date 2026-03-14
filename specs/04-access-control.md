@@ -33,12 +33,15 @@
 
 ## Định dạng Link Công khai
 
-```
-https://r2-bucket.r2.cloudflarestorage.com/{storage_path}?{presigned_params}
-```
-
-hoặc dùng domain tùy chỉnh:
+Presigned URL được tạo từ Cloudflare R2:
 
 ```
-https://files.aeshield.com/{cid}
+https://<account_id>.r2.cloudflarestorage.com/{storage_path}?X-Amz-Signature=...
+```
+
+URL có hiệu lực trong **1 giờ** (mặc định). Với file public, bất kỳ ai có link đều có thể dùng endpoint download để lấy URL này — không cần JWT.
+
+Tùy chọn mở rộng: expose domain riêng qua Cloudflare R2 custom domain:
+```
+https://files.aeshield.com/{public_cid}
 ```
