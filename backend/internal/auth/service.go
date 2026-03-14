@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aeshield/backend/internal/config"
+	"github.com/aeshield/backend/internal/database"
 	"github.com/aeshield/backend/models"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -55,14 +56,14 @@ func NewService(cfg *config.Config, userRepo UserRepository) *Service {
 			ClientSecret: cfg.GoogleClientSecret,
 			Scopes:       []string{"https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"},
 			Endpoint:     google.Endpoint,
-			RedirectURL:  cfg.RedirectURL,
+			RedirectURL:  cfg.GoogleRedirectURL,
 		},
 		githubCfg: &oauth2.Config{
 			ClientID:     cfg.GitHubClientID,
 			ClientSecret: cfg.GitHubClientSecret,
 			Scopes:       []string{"user:email", "read:user"},
 			Endpoint:     github.Endpoint,
-			RedirectURL:  cfg.RedirectURL,
+			RedirectURL:  cfg.GitHubRedirectURL,
 		},
 	}
 }
@@ -153,15 +154,15 @@ func (s *Service) getGitHubPrimaryEmail(token *oauth2.Token) (string, error) {
 	return "", errors.New("no primary email found")
 }
 
-var ErrUserNotFound = errors.New("user not found")
-
 func (s *Service) FindOrCreateUser(ctx context.Context, provider, providerID, email, name, avatar string) (*models.User, error) {
 	if s.userRepo == nil {
 		return nil, errors.New("user repository not configured")
 	}
 
+	// 1. Tìm theo provider + providerID (đã từng login trước đó)
 	user, err := s.userRepo.FindByProvider(ctx, provider, providerID)
 	if err == nil {
+		// Cập nhật thông tin mới nhất
 		updated := false
 		if user.Name != name {
 			user.Name = name
@@ -171,11 +172,6 @@ func (s *Service) FindOrCreateUser(ctx context.Context, provider, providerID, em
 			user.Avatar = avatar
 			updated = true
 		}
-		if user.Email != email {
-			user.Email = email
-			updated = true
-		}
-
 		if updated {
 			if err := s.userRepo.Update(ctx, user); err != nil {
 				return nil, err
@@ -184,16 +180,41 @@ func (s *Service) FindOrCreateUser(ctx context.Context, provider, providerID, em
 		return user, nil
 	}
 
-	if !errors.Is(err, ErrUserNotFound) {
+	if !errors.Is(err, database.ErrUserNotFound) {
 		return nil, err
 	}
 
+	// 2. Tìm theo email - nếu cùng email thì merge provider vào user hiện có
+	if email != "" {
+		existingUser, err := s.userRepo.FindByEmail(ctx, email)
+		if err == nil {
+			// Thêm provider mới vào user đã có
+			existingUser.Providers = append(existingUser.Providers, models.LinkedProvider{
+				Provider:   provider,
+				ProviderID: providerID,
+			})
+			// Cập nhật avatar nếu chưa có
+			if existingUser.Avatar == "" && avatar != "" {
+				existingUser.Avatar = avatar
+			}
+			if err := s.userRepo.Update(ctx, existingUser); err != nil {
+				return nil, err
+			}
+			return existingUser, nil
+		}
+		if !errors.Is(err, database.ErrUserNotFound) {
+			return nil, err
+		}
+	}
+
+	// 3. Tạo user mới
 	user = &models.User{
-		Provider:   provider,
-		ProviderID: providerID,
-		Email:      email,
-		Name:       name,
-		Avatar:     avatar,
+		Email:  email,
+		Name:   name,
+		Avatar: avatar,
+		Providers: []models.LinkedProvider{
+			{Provider: provider, ProviderID: providerID},
+		},
 	}
 
 	if err := s.userRepo.Create(ctx, user); err != nil {

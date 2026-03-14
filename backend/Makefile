@@ -1,7 +1,7 @@
 .PHONY: dev build lint test test-unit test-e2e clean
 
 dev:
-	go run cmd/main.go
+	air
 
 build:
 	go build -o server cmd/main.go
