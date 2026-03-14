@@ -1,0 +1,227 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+
+:root {
+  --primary: #f6831e;
+  --primary-light: rgba(246, 131, 30, 0.1);
+  --background: #f8f7f5;
+  --surface: #ffffff;
+  --charcoal: #3e3935;
+  --charcoal-light: rgba(62, 57, 53, 0.6);
+  --text-muted: #94a3b8;
+  --border: #e2e8f0;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--background);
+  min-height: 100vh;
+}
+
+/* Login Page */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.login-container {
+  width: 100%;
+  max-width: 28rem;
+}
+
+/* Brand Identity */
+.brand-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 2.5rem;
+}
+
+.brand-icon {
+  background-color: var(--primary-light);
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.brand-icon .material-symbols-outlined {
+  color: var(--primary);
+  font-size: 2.5rem;
+  font-variation-settings: 'FILL' 1;
+}
+
+.brand-identity h1 {
+  font-size: 1.875rem;
+  font-weight: 700;
+  color: var(--charcoal);
+  letter-spacing: -0.025em;
+}
+
+.brand-identity p {
+  color: var(--charcoal-light);
+  margin-top: 0.5rem;
+  text-align: center;
+  font-size: 0.875rem;
+}
+
+/* Login Card */
+.login-card {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
+  padding: 2rem;
+}
+
+.login-header {
+  margin-bottom: 2rem;
+}
+
+.login-header h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--charcoal);
+}
+
+.login-header p {
+  color: var(--charcoal-light);
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+}
+
+/* Error Message */
+.error-message {
+  background-color: #fef2f2;
+  color: #dc2626;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+/* Login Buttons */
+.login-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.login-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  width: 100%;
+  height: 3rem;
+  padding: 0 1.25rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  background-color: white;
+  color: var(--charcoal);
+  font-weight: 500;
+  font-size: 0.9375rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.login-button:hover:not(:disabled) {
+  background-color: #f8fafc;
+}
+
+.login-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.login-button svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+/* Spinner */
+.spinner {
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Security Badge */
+.security-badge {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--charcoal-light);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.security-badge .material-symbols-outlined {
+  font-size: 0.875rem;
+}
+
+/* Footer Info */
+.footer-info {
+  margin-top: 2rem;
+  text-align: center;
+}
+
+.badges {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.badge {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--charcoal-light);
+  font-size: 0.75rem;
+}
+
+.badge .material-symbols-outlined {
+  font-size: 0.875rem;
+}
+
+.terms {
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  max-width: 280px;
+  margin: 0 auto;
+}
+
+.terms a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.terms a:hover {
+  text-decoration: underline;
+}

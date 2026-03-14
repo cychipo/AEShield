@@ -1,37 +1,20 @@
-// Package main provides the AEShield API server
-//
-//	@title			AEShield API
-//	@version		1.0
-//	@description	Secure file storage API with client-side encryption
-//	@termsOfService	http://localhost:8080/terms
-//
-//	@contact.name	API Support
-//	@contact.url	http://localhost:8080/support
-//	@contact.email	support@aeshield.io
-//
-//	@license.name	Apache 2.0
-//	@license.url	http://www.apache.org/licenses/LICENSE-2.0.html
-//
-//	@host		localhost:8080
-//	@BasePath	/api/v1
-//
-//	@securityDefinitions.apikey	BearerAuth
-//	@in							header
-//	@name						Authorization
-//	@description				Type "Bearer" followed by a space and JWT token.
 package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	_ "github.com/aeshield/backend/docs"
 	"github.com/aeshield/backend/internal/auth"
 	"github.com/aeshield/backend/internal/config"
 	"github.com/aeshield/backend/internal/database"
+	"github.com/aeshield/backend/internal/files"
+	"github.com/aeshield/backend/internal/storage"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -41,14 +24,42 @@ import (
 func main() {
 	cfg := config.Load()
 
+	// Get project root directory
+	// Ưu tiên env var FRONTEND_DIST nếu được set
+	frontendDist := os.Getenv("FRONTEND_DIST")
+	if frontendDist == "" {
+		// Fallback: dùng working directory (go run chạy từ thư mục backend)
+		wd, _ := os.Getwd()
+		// Nếu đang ở trong thư mục backend, lên 1 cấp
+		if filepath.Base(wd) == "backend" {
+			wd = filepath.Dir(wd)
+		}
+		frontendDist = filepath.Join(wd, "frontend", "dist")
+	}
+
 	if _, err := database.Connect(cfg); err != nil {
 		log.Fatalf("Failed to connect to MongoDB: %v", err)
 	}
 
 	userRepo := database.NewUserRepository(database.GetDB())
+	if err := userRepo.MigrateOldSchema(context.Background()); err != nil {
+		log.Printf("Warning: failed to migrate old schema: %v", err)
+	}
 	if err := userRepo.CreateIndexes(context.Background()); err != nil {
 		log.Printf("Warning: failed to create user indexes: %v", err)
 	}
+
+	// Setup R2 và file storage
+	r2Client, err := storage.NewR2Client(cfg)
+	if err != nil {
+		log.Fatalf("Failed to init R2 client: %v", err)
+	}
+	fileRepo := storage.NewFileRepository(database.GetDB().Database)
+	if err := fileRepo.CreateIndexes(context.Background()); err != nil {
+		log.Printf("Warning: failed to create file indexes: %v", err)
+	}
+	fileService := files.NewService(r2Client, fileRepo)
+	fileHandler := files.NewHandler(fileService)
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
@@ -70,18 +81,97 @@ func main() {
 	authService := auth.NewService(cfg, userRepo)
 	authHandler := auth.NewHandler(authService)
 
-	api := app.Group("/api/v1")
-	protected := api.Group("", auth.JWTMiddleware(cfg.JWTSecret))
+	// Public routes
+	app.Get("/api/v1/auth/urls", authHandler.GetAuthURLs)
+	app.Get("/api/v1/auth/google", authHandler.GoogleLogin)
+	app.Get("/api/v1/auth/google/callback", authHandler.GoogleCallback)
+	app.Get("/api/v1/auth/github", authHandler.GitHubLogin)
+	app.Get("/api/v1/auth/github/callback", authHandler.GitHubCallback)
 
-	api.Get("/auth/urls", authHandler.GetAuthURLs)
+	// Protected routes
+	app.Get("/api/v1/auth/me", auth.JWTMiddleware(cfg.JWTSecret), authHandler.Me)
 
-	api.Get("/auth/google", authHandler.GoogleLogin)
-	api.Get("/auth/google/callback", authHandler.GoogleCallback)
+	// File routes (protected)
+	app.Post("/api/v1/files/upload", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Upload)
+	app.Get("/api/v1/files", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.ListFiles)
+	app.Get("/api/v1/files/:id/download", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Download)
+	app.Delete("/api/v1/files/:id", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Delete)
+	app.Patch("/api/v1/files/share", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Share)
 
-	api.Get("/auth/github", authHandler.GitHubLogin)
-	api.Get("/auth/github/callback", authHandler.GitHubCallback)
+	// OAuth callback - Google/GitHub redirect thẳng đến đây, xử lý code và trả HTML
+	app.Get("/auth/google/callback", func(c *fiber.Ctx) error {
+		code := c.Query("code")
+		html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Authenticating...</title>
+    <script>
+        async function completeAuth() {
+            try {
+                const response = await fetch('/api/v1/auth/google/callback?code=%s');
+                const data = await response.json();
+                if (data.token) {
+                    localStorage.setItem('aeshield_token', data.token);
+                    localStorage.setItem('aeshield_user', JSON.stringify(data.user));
+                    window.location.href = '/dashboard';
+                } else {
+                    document.body.innerHTML = '<p style="color:red;text-align:center;margin-top:50px;font-family:sans-serif;">Authentication failed: ' + (data.error || 'Unknown error') + '</p><center><a href="/">Try again</a></center>';
+                }
+            } catch (err) {
+                document.body.innerHTML = '<p style="color:red;text-align:center;margin-top:50px;font-family:sans-serif;">Error: ' + err.message + '</p><center><a href="/">Try again</a></center>';
+            }
+        }
+        completeAuth();
+    </script>
+</head>
+<body><p style="text-align:center;margin-top:50px;font-family:sans-serif;">Authenticating...</p></body>
+</html>`, code)
+		return c.Type("html").SendString(html)
+	})
 
-	protected.Get("/auth/me", authHandler.Me)
+	app.Get("/auth/github/callback", func(c *fiber.Ctx) error {
+		code := c.Query("code")
+		html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Authenticating...</title>
+    <script>
+        async function completeAuth() {
+            try {
+                const response = await fetch('/api/v1/auth/github/callback?code=%s');
+                const data = await response.json();
+                if (data.token) {
+                    localStorage.setItem('aeshield_token', data.token);
+                    localStorage.setItem('aeshield_user', JSON.stringify(data.user));
+                    window.location.href = '/dashboard';
+                } else {
+                    document.body.innerHTML = '<p style="color:red;text-align:center;margin-top:50px;font-family:sans-serif;">Authentication failed: ' + (data.error || 'Unknown error') + '</p><center><a href="/">Try again</a></center>';
+                }
+            } catch (err) {
+                document.body.innerHTML = '<p style="color:red;text-align:center;margin-top:50px;font-family:sans-serif;">Error: ' + err.message + '</p><center><a href="/">Try again</a></center>';
+            }
+        }
+        completeAuth();
+    </script>
+</head>
+<body><p style="text-align:center;margin-top:50px;font-family:sans-serif;">Authenticating...</p></body>
+</html>`, code)
+		return c.Type("html").SendString(html)
+	})
+
+	// Serve frontend static files
+	app.Static("/", frontendDist)
+
+	// For SPA - redirect non-API routes to index.html
+	app.Use(func(c *fiber.Ctx) error {
+		path := c.Route().Path
+		if !startsWith(path, "/api") && !startsWith(path, "/auth") && !startsWith(path, "/docs") {
+			return c.SendFile(filepath.Join(frontendDist, "index.html"))
+		}
+		return c.Next()
+	})
 
 	go func() {
 		log.Printf("Server starting on port %s", cfg.Port)
@@ -106,4 +196,8 @@ func main() {
 	}
 
 	log.Println("Server exited")
+}
+
+func startsWith(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }

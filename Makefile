@@ -1,31 +1,22 @@
-.PHONY: dev build build:mac build:win build:linux clean install
+.PHONY: dev dev_be build clean install
 
-# Install dependencies
 install:
 	cd frontend && yarn install
+	cd backend && go mod download
 
-# Development
+dev_be:
+	cd backend && go run cmd/main.go
+
 dev:
-	wails dev
+	cd backend && go run cmd/main.go
 
-# Build all platforms
 build:
-	wails build
+	cd frontend && yarn build
+	cd backend && go build -o server ./cmd/main.go
 
-# Build for macOS
-build:mac:
-	wails build -platform=darwin/arm64
-	wails build -platform=darwin/amd64
-
-# Build for Windows
-build:win:
-	wails build -platform=windows/amd64
-
-# Build for Linux
-build:linux:
-	wails build -platform=linux/arm64
-	wails build -platform=linux/amd64
-
-# Clean build artifacts
 clean:
-	rm -rf build/*
+	rm -rf frontend/dist
+	rm -f backend/server
+
+run:
+	cd backend && ./server

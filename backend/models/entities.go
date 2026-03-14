@@ -6,15 +6,19 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+type LinkedProvider struct {
+	Provider   string `bson:"provider" json:"provider"`
+	ProviderID string `bson:"provider_id" json:"provider_id"`
+}
+
 type User struct {
-	ID         primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Provider   string             `bson:"provider" json:"provider"`
-	ProviderID string             `bson:"provider_id" json:"provider_id"`
-	Email      string             `bson:"email" json:"email"`
-	Avatar     string             `bson:"avatar" json:"avatar"`
-	Name       string             `bson:"name" json:"name"`
-	CreatedAt  time.Time          `bson:"created_at" json:"created_at"`
-	UpdatedAt  time.Time          `bson:"updated_at" json:"updated_at"`
+	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Email     string             `bson:"email" json:"email"`
+	Avatar    string             `bson:"avatar" json:"avatar"`
+	Name      string             `bson:"name" json:"name"`
+	Providers []LinkedProvider   `bson:"providers" json:"providers"`
+	CreatedAt time.Time          `bson:"created_at" json:"created_at"`
+	UpdatedAt time.Time          `bson:"updated_at" json:"updated_at"`
 }
 
 func (User) CollectionName() string {
