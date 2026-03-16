@@ -12,6 +12,7 @@ func init() {
 
 type Config struct {
 	Port               string
+	FrontendURL        string
 	JWTSecret          string
 	GoogleClientID     string
 	GoogleClientSecret string
@@ -31,6 +32,7 @@ type Config struct {
 func Load() *Config {
 	return &Config{
 		Port:               getEnv("PORT", "6868"),
+		FrontendURL:        getEnv("FRONTEND_URL", "http://localhost:5173"),
 		JWTSecret:          getEnv("JWT_SECRET", "your-secret-key-change-in-production"),
 		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
 		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
