@@ -461,6 +461,7 @@ func setupHandlerApp(r2 *mockR2, repo *mockFileRepo, userID string) *fiber.App {
 	app.Get("/files/:id/download", h.Download)
 	app.Delete("/files/:id", h.Delete)
 	app.Patch("/files/share", h.Share)
+	app.Patch("/files/:id", h.Share)
 
 	return app
 }
@@ -622,6 +623,7 @@ func TestShare_OwnerCanMakePublic(t *testing.T) {
 	updated, err := svc.Share(context.Background(), ShareInput{
 		FileID:     f.ID.Hex(),
 		OwnerID:    "owner-1",
+		Filename:   "public-file.txt",
 		AccessMode: "public",
 	})
 
@@ -639,6 +641,7 @@ func TestShare_OwnerCanSetWhitelist(t *testing.T) {
 	updated, err := svc.Share(context.Background(), ShareInput{
 		FileID:     f.ID.Hex(),
 		OwnerID:    "owner-1",
+		Filename:   "whitelist-file.txt",
 		AccessMode: "whitelist",
 		Whitelist:  []string{"alice@test.com", "bob@test.com"},
 	})
@@ -657,6 +660,7 @@ func TestShare_NonOwnerDenied(t *testing.T) {
 	_, err := svc.Share(context.Background(), ShareInput{
 		FileID:     f.ID.Hex(),
 		OwnerID:    "other-user",
+		Filename:   "no-access.txt",
 		AccessMode: "public",
 	})
 
@@ -672,6 +676,7 @@ func TestShare_FileNotFound(t *testing.T) {
 	_, err := svc.Share(context.Background(), ShareInput{
 		FileID:     primitive.NewObjectID().Hex(),
 		OwnerID:    "owner-1",
+		Filename:   "missing-file.txt",
 		AccessMode: "public",
 	})
 
@@ -688,11 +693,48 @@ func TestShare_InvalidAccessMode(t *testing.T) {
 	_, err := svc.Share(context.Background(), ShareInput{
 		FileID:     f.ID.Hex(),
 		OwnerID:    "owner-1",
+		Filename:   "invalid-mode.txt",
 		AccessMode: "badmode",
 	})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid access_mode")
+}
+
+func TestShare_RequireFilename(t *testing.T) {
+	r2 := &mockR2{}
+	repo := newMockFileRepo()
+	f := seedFile(repo, "owner-1", "private", nil)
+	svc := newTestService(r2, repo)
+
+	_, err := svc.Share(context.Background(), ShareInput{
+		FileID:     f.ID.Hex(),
+		OwnerID:    "owner-1",
+		Filename:   "   ",
+		AccessMode: "private",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "filename is required")
+}
+
+func TestShare_PrivateClearsWhitelist(t *testing.T) {
+	r2 := &mockR2{}
+	repo := newMockFileRepo()
+	f := seedFile(repo, "owner-1", "whitelist", []string{"alice@test.com"})
+	svc := newTestService(r2, repo)
+
+	updated, err := svc.Share(context.Background(), ShareInput{
+		FileID:     f.ID.Hex(),
+		OwnerID:    "owner-1",
+		Filename:   "private-file.txt",
+		AccessMode: "private",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "private", updated.AccessMode)
+	assert.Empty(t, updated.Whitelist)
+	assert.Equal(t, "private-file.txt", updated.Filename)
 }
 
 // Handler tests — Share
@@ -702,7 +744,7 @@ func TestHandler_Share_Success(t *testing.T) {
 	f := seedFile(repo, "user-1", "private", nil)
 	app := setupHandlerApp(r2, repo, "user-1")
 
-	body := fmt.Sprintf(`{"file_id":"%s","access_mode":"public"}`, f.ID.Hex())
+	body := fmt.Sprintf(`{"file_id":"%s","filename":"updated-name.txt","access_mode":"public"}`, f.ID.Hex())
 	req := httptest.NewRequest("PATCH", "/files/share", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
@@ -716,12 +758,42 @@ func TestHandler_Share_MissingFileID(t *testing.T) {
 	repo := newMockFileRepo()
 	app := setupHandlerApp(r2, repo, "user-1")
 
-	req := httptest.NewRequest("PATCH", "/files/share", strings.NewReader(`{"access_mode":"public"}`))
+	req := httptest.NewRequest("PATCH", "/files/share", strings.NewReader(`{"filename":"newname.txt","access_mode":"public"}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, fiber.StatusBadRequest, resp.StatusCode)
+}
+
+func TestHandler_Share_MissingFilename(t *testing.T) {
+	r2 := &mockR2{}
+	repo := newMockFileRepo()
+	f := seedFile(repo, "user-1", "private", nil)
+	app := setupHandlerApp(r2, repo, "user-1")
+
+	body := fmt.Sprintf(`{"file_id":"%s","access_mode":"public"}`, f.ID.Hex())
+	req := httptest.NewRequest("PATCH", "/files/share", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, fiber.StatusBadRequest, resp.StatusCode)
+}
+
+func TestHandler_Share_ByPathID_Success(t *testing.T) {
+	r2 := &mockR2{}
+	repo := newMockFileRepo()
+	f := seedFile(repo, "user-1", "private", nil)
+	app := setupHandlerApp(r2, repo, "user-1")
+
+	body := `{"filename":"rename-by-path.txt","access_mode":"private"}`
+	req := httptest.NewRequest("PATCH", "/files/"+f.ID.Hex(), strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, fiber.StatusOK, resp.StatusCode)
 }
 
 // Đảm bảo interfaces được implement đúng (compile-time check)

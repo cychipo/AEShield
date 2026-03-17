@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/aeshield/backend/internal/crypto"
@@ -136,6 +137,7 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (*models.FileMe
 type ShareInput struct {
 	FileID     string
 	OwnerID    string
+	Filename   string
 	AccessMode string   // "public" | "private" | "whitelist"
 	Whitelist  []string // dùng khi AccessMode == "whitelist"
 }
@@ -151,23 +153,32 @@ func (s *Service) Share(ctx context.Context, input ShareInput) (*models.FileMeta
 		return nil, fmt.Errorf("access denied")
 	}
 
-	switch models.AccessMode(input.AccessMode) {
+	nextAccessMode := models.AccessMode(input.AccessMode)
+	switch nextAccessMode {
 	case models.AccessModePublic, models.AccessModePrivate, models.AccessModeWhitelist:
 	default:
 		return nil, fmt.Errorf("invalid access_mode: %s", input.AccessMode)
 	}
 
-	file.AccessMode = input.AccessMode
+	nextFilename := strings.TrimSpace(input.Filename)
+	if nextFilename == "" {
+		return nil, fmt.Errorf("filename is required")
+	}
 
-	if models.AccessMode(input.AccessMode) == models.AccessModePublic && file.PublicCID == "" {
+	file.Filename = nextFilename
+	file.AccessMode = string(nextAccessMode)
+
+	if nextAccessMode == models.AccessModePublic && file.PublicCID == "" {
 		file.PublicCID = uuid.New().String()
 	}
 
-	if models.AccessMode(input.AccessMode) == models.AccessModeWhitelist {
+	if nextAccessMode == models.AccessModeWhitelist {
 		if input.Whitelist == nil {
 			input.Whitelist = []string{}
 		}
 		file.Whitelist = input.Whitelist
+	} else {
+		file.Whitelist = []string{}
 	}
 
 	if err := s.fileRepo.Update(ctx, file); err != nil {

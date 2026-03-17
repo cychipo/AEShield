@@ -26,6 +26,46 @@ const IMAGE_MIME_BY_EXT = {
   svg: "image/svg+xml",
 };
 
+function readChunkLength(encryptedBytes, offset) {
+  return (
+    (encryptedBytes[offset] * 0x1000000) +
+    (encryptedBytes[offset + 1] << 16) +
+    (encryptedBytes[offset + 2] << 8) +
+    encryptedBytes[offset + 3]
+  );
+}
+
+function bytesToHex(bytes, bytesPerLine = 16) {
+  if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
+    return "";
+  }
+
+  const lines = [];
+
+  for (let i = 0; i < bytes.length; i += bytesPerLine) {
+    const lineBytes = bytes.slice(i, i + bytesPerLine);
+    const line = Array.from(lineBytes, (value) =>
+      value.toString(16).padStart(2, "0")
+    ).join(" ");
+    lines.push(line);
+  }
+
+  return lines.join("\n");
+}
+
+function bytesToBase64(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
+    return "";
+  }
+
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+
+  return btoa(binary);
+}
+
 export function parseEncryptedHeader(encryptedBytes) {
   if (!(encryptedBytes instanceof Uint8Array)) {
     throw new Error("Dữ liệu mã hóa không hợp lệ.");
@@ -128,11 +168,7 @@ export async function decryptEncryptedFile(encryptedInput, password) {
       throw new Error("Tệp mã hóa bị lỗi (thiếu độ dài chunk).");
     }
 
-    const chunkLength =
-      (encryptedBytes[offset] * 0x1000000) +
-      (encryptedBytes[offset + 1] << 16) +
-      (encryptedBytes[offset + 2] << 8) +
-      encryptedBytes[offset + 3];
+    const chunkLength = readChunkLength(encryptedBytes, offset);
     offset += 4;
 
     if (!Number.isFinite(chunkLength) || chunkLength < 16) {
@@ -176,6 +212,67 @@ export async function decryptEncryptedFile(encryptedInput, password) {
   }
 
   return plaintext;
+}
+
+export function inspectEncryptedFile(encryptedInput, options = {}) {
+  const encryptedBytes =
+    encryptedInput instanceof Uint8Array
+      ? encryptedInput
+      : new Uint8Array(encryptedInput);
+
+  const { keyByte, keyLength, salt, baseNonce, dataOffset } =
+    parseEncryptedHeader(encryptedBytes);
+
+  const maxPreviewBytes = Number.isFinite(options.maxPreviewBytes)
+    ? Math.max(1, Math.floor(options.maxPreviewBytes))
+    : 512;
+
+  let offset = dataOffset;
+  let chunkCount = 0;
+  let totalCipherPayloadBytes = 0;
+
+  while (offset < encryptedBytes.length) {
+    if (offset + 4 > encryptedBytes.length) {
+      throw new Error("Tệp mã hóa bị lỗi (thiếu độ dài chunk).");
+    }
+
+    const chunkLength = readChunkLength(encryptedBytes, offset);
+    offset += 4;
+
+    if (!Number.isFinite(chunkLength) || chunkLength < 16) {
+      throw new Error("Tệp mã hóa bị lỗi (chunk không hợp lệ).");
+    }
+
+    if (offset + chunkLength > encryptedBytes.length) {
+      throw new Error("Tệp mã hóa bị lỗi (chunk vượt quá kích thước tệp).");
+    }
+
+    totalCipherPayloadBytes += chunkLength;
+    chunkCount += 1;
+    offset += chunkLength;
+  }
+
+  const previewBytes = encryptedBytes.slice(
+    0,
+    Math.min(maxPreviewBytes, encryptedBytes.length)
+  );
+
+  return {
+    totalEncryptedBytes: encryptedBytes.length,
+    headerSize: dataOffset,
+    keyByte,
+    keyLength,
+    saltHex: bytesToHex(salt),
+    baseNonceHex: bytesToHex(baseNonce),
+    chunkCount,
+    totalCipherPayloadBytes,
+    previewHex: bytesToHex(previewBytes),
+    previewBase64: bytesToBase64(previewBytes),
+    truncated:
+      previewBytes.length < encryptedBytes.length
+        ? `Đang hiển thị ${previewBytes.length}/${encryptedBytes.length} bytes đầu.`
+        : "Đang hiển thị toàn bộ dữ liệu mã hóa.",
+  };
 }
 
 export function detectPreviewType(filename) {

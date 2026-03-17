@@ -199,12 +199,20 @@ func (h *Handler) Share(c *fiber.Ctx) error {
 	}
 
 	if req.FileID == "" {
+		req.FileID = c.Params("id")
+	}
+	if req.FileID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "file_id is required"})
+	}
+
+	if req.Filename == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "filename is required"})
 	}
 
 	file, err := h.service.Share(c.Context(), ShareInput{
 		FileID:     req.FileID,
 		OwnerID:    claims.UserID,
+		Filename:   req.Filename,
 		AccessMode: req.AccessMode,
 		Whitelist:  req.Whitelist,
 	})
@@ -223,6 +231,7 @@ func (h *Handler) Share(c *fiber.Ctx) error {
 
 type shareRequest struct {
 	FileID     string   `json:"file_id"`
+	Filename   string   `json:"filename"`
 	AccessMode string   `json:"access_mode"`
 	Whitelist  []string `json:"whitelist"`
 }

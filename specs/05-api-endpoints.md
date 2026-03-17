@@ -123,6 +123,7 @@ Cập nhật chế độ chia sẻ hoặc whitelist của file. Chỉ owner mớ
 ```json
 {
   "file_id": "507f1f77bcf86cd799439011",
+  "filename": "renamed-document.pdf",
   "access_mode": "whitelist",
   "whitelist": ["alice@example.com", "bob@example.com"]
 }
@@ -131,7 +132,7 @@ Cập nhật chế độ chia sẻ hoặc whitelist của file. Chỉ owner mớ
 **Response `200`:** `FileMetadata` đã cập nhật
 
 **Lỗi:**
-- `400` — `file_id` thiếu hoặc `access_mode` không hợp lệ
+- `400` — `file_id`/`filename` thiếu hoặc `access_mode` không hợp lệ
 - `403` — không phải owner
 - `404` — file không tồn tại
 

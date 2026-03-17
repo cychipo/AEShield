@@ -96,6 +96,7 @@ func main() {
 	app.Get("/api/v1/files/:id/download", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Download)
 	app.Delete("/api/v1/files/:id", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Delete)
 	app.Patch("/api/v1/files/share", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Share)
+	app.Patch("/api/v1/files/:id", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Share)
 
 	// Serve frontend static files
 	app.Static("/", frontendDist)

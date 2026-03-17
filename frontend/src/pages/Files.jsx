@@ -11,11 +11,14 @@ import {
   CloudUpload,
   Download,
   Eye,
+  FileCode2,
+  Pencil,
   Trash2,
 } from "lucide-react";
 import {
   decryptEncryptedFile,
   detectPreviewType,
+  inspectEncryptedFile,
 } from "../utils/encryptedPreview";
 
 const API_BASE_URL =
@@ -38,6 +41,7 @@ export default function Files() {
   const [filesError, setFilesError] = useState("");
   const [downloadingFileId, setDownloadingFileId] = useState("");
   const [deletingFileId, setDeletingFileId] = useState("");
+  const [editingFileId, setEditingFileId] = useState("");
   const [previewingFileId, setPreviewingFileId] = useState("");
   const [showPreview, setShowPreview] = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
@@ -48,6 +52,22 @@ export default function Files() {
   const [previewType, setPreviewType] = useState("unsupported");
   const [previewText, setPreviewText] = useState("");
   const [previewObjectUrl, setPreviewObjectUrl] = useState("");
+
+  const [showEncryptedData, setShowEncryptedData] = useState(false);
+  const [encryptedDataFile, setEncryptedDataFile] = useState(null);
+  const [encryptedDataLoading, setEncryptedDataLoading] = useState(false);
+  const [encryptedDataError, setEncryptedDataError] = useState("");
+  const [encryptedDataStage, setEncryptedDataStage] = useState("");
+  const [encryptedDataInfo, setEncryptedDataInfo] = useState(null);
+  const [encryptedDataCopyMessage, setEncryptedDataCopyMessage] = useState("");
+
+  const [showEditFile, setShowEditFile] = useState(false);
+  const [editFile, setEditFile] = useState(null);
+  const [editFilename, setEditFilename] = useState("");
+  const [editAccessMode, setEditAccessMode] = useState("private");
+  const [editWhitelistText, setEditWhitelistText] = useState("");
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState("");
   const fileInputRef = useRef(null);
   const previewObjectUrlRef = useRef("");
   const navigate = useNavigate();
@@ -270,6 +290,20 @@ export default function Files() {
     clearPreviewObjectUrl();
   };
 
+  const closeEncryptedData = () => {
+    if (encryptedDataLoading) {
+      return;
+    }
+
+    setShowEncryptedData(false);
+    setEncryptedDataFile(null);
+    setEncryptedDataLoading(false);
+    setEncryptedDataError("");
+    setEncryptedDataStage("");
+    setEncryptedDataInfo(null);
+    setEncryptedDataCopyMessage("");
+  };
+
   const openPreview = (file) => {
     const rowFileId = file?.id;
     if (!rowFileId) {
@@ -288,6 +322,240 @@ export default function Files() {
     setPreviewType(detectedType.type);
     setPreviewText("");
     clearPreviewObjectUrl();
+  };
+
+  const openEncryptedData = (file) => {
+    const rowFileId = file?.id;
+    if (!rowFileId) {
+      return;
+    }
+
+    setShowEncryptedData(true);
+    setEncryptedDataFile(file);
+    setEncryptedDataLoading(false);
+    setEncryptedDataError("");
+    setEncryptedDataStage("");
+    setEncryptedDataInfo(null);
+    setEncryptedDataCopyMessage("");
+  };
+
+  const openEditFile = (file) => {
+    const rowFileId = file?.id;
+    if (!rowFileId) {
+      return;
+    }
+
+    setShowEditFile(true);
+    setEditFile(file);
+    setEditFilename(file?.filename || "");
+    setEditAccessMode(file?.access_mode || "private");
+    setEditWhitelistText(
+      Array.isArray(file?.whitelist) ? file.whitelist.join("\n") : ""
+    );
+    setEditLoading(false);
+    setEditError("");
+    setEditingFileId(rowFileId);
+  };
+
+  const closeEditFile = () => {
+    if (editLoading) {
+      return;
+    }
+
+    setShowEditFile(false);
+    setEditFile(null);
+    setEditFilename("");
+    setEditAccessMode("private");
+    setEditWhitelistText("");
+    setEditLoading(false);
+    setEditError("");
+    setEditingFileId("");
+  };
+
+  const handleEditFile = async (event) => {
+    event.preventDefault();
+
+    const token = localStorage.getItem("aeshield_token");
+    if (!token) {
+      navigate("/", { replace: true });
+      return;
+    }
+
+    const fileId = editFile?.id;
+    if (!fileId) {
+      setEditError("Không tìm thấy tệp tin để chỉnh sửa.");
+      return;
+    }
+
+    const nextFilename = editFilename.trim();
+    if (!nextFilename) {
+      setEditError("Tên tệp không được để trống.");
+      return;
+    }
+
+    const nextWhitelist =
+      editAccessMode === "whitelist"
+        ? editWhitelistText
+            .split("\n")
+            .map((item) => item.trim())
+            .filter((item) => item.length > 0)
+        : [];
+
+    setEditLoading(true);
+    setEditError("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/files/${fileId}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          filename: nextFilename,
+          access_mode: editAccessMode,
+          whitelist: nextWhitelist,
+        }),
+      });
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem("aeshield_token");
+          localStorage.removeItem("aeshield_user");
+          navigate("/", { replace: true });
+          return;
+        }
+
+        setEditError(payload?.error || "Không thể cập nhật tệp tin.");
+        return;
+      }
+
+      setFiles((prevFiles) =>
+        prevFiles.map((file) => (file.id === fileId ? payload : file))
+      );
+
+      closeEditFile();
+      await fetchFiles(token);
+    } catch (error) {
+      console.error("Error editing file:", error);
+      setEditError("Có lỗi xảy ra khi cập nhật tệp tin.");
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleInspectEncryptedData = async () => {
+    const fileId = encryptedDataFile?.id;
+    if (!fileId) {
+      setEncryptedDataError("Không tìm thấy tệp tin để xem dữ liệu mã hóa.");
+      return;
+    }
+
+    const token = localStorage.getItem("aeshield_token");
+    if (!token) {
+      navigate("/", { replace: true });
+      return;
+    }
+
+    setEncryptedDataLoading(true);
+    setEncryptedDataError("");
+    setEncryptedDataInfo(null);
+    setEncryptedDataCopyMessage("");
+    setEncryptedDataStage("Đang lấy liên kết tải...");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/files/${fileId}/download`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem("aeshield_token");
+          localStorage.removeItem("aeshield_user");
+          navigate("/", { replace: true });
+          return;
+        }
+
+        setEncryptedDataError(
+          payload?.error || "Không thể lấy tệp tin để xem dữ liệu mã hóa."
+        );
+        return;
+      }
+
+      if (!payload?.url) {
+        setEncryptedDataError("Không nhận được đường dẫn tải tệp tin.");
+        return;
+      }
+
+      setEncryptedDataStage("Đang tải dữ liệu mã hóa...");
+      const encryptedResponse = await fetch(payload.url);
+      if (!encryptedResponse.ok) {
+        setEncryptedDataError("Không thể tải dữ liệu tệp tin.");
+        return;
+      }
+
+      const encryptedBuffer = await encryptedResponse.arrayBuffer();
+
+      setEncryptedDataStage("Đang phân tích dữ liệu mã hóa...");
+      const inspected = inspectEncryptedFile(new Uint8Array(encryptedBuffer), {
+        maxPreviewBytes: 512,
+      });
+
+      setEncryptedDataInfo(inspected);
+      setEncryptedDataError("");
+    } catch (error) {
+      setEncryptedDataInfo(null);
+      setEncryptedDataError(
+        error instanceof Error && error.message
+          ? error.message
+          : "Có lỗi xảy ra khi phân tích dữ liệu mã hóa."
+      );
+    } finally {
+      setEncryptedDataLoading(false);
+      setEncryptedDataStage("");
+    }
+  };
+
+  const handleCopyEncryptedData = async (kind) => {
+    const value =
+      kind === "base64"
+        ? encryptedDataInfo?.previewBase64
+        : encryptedDataInfo?.previewHex;
+
+    if (!value) {
+      setEncryptedDataCopyMessage("Không có dữ liệu để sao chép.");
+      return;
+    }
+
+    if (!navigator?.clipboard?.writeText) {
+      setEncryptedDataCopyMessage("Trình duyệt không hỗ trợ sao chép tự động.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(value);
+      setEncryptedDataCopyMessage(
+        kind === "base64" ? "Đã copy Base64." : "Đã copy Hex dump."
+      );
+    } catch {
+      setEncryptedDataCopyMessage("Sao chép thất bại. Vui lòng thử lại.");
+    }
   };
 
   const handleDecryptPreview = async (event) => {
@@ -809,8 +1077,11 @@ export default function Files() {
                         const rowFileId = file.id;
                         const isDownloading = downloadingFileId === rowFileId;
                         const isDeleting = deletingFileId === rowFileId;
+                        const isEditing = showEditFile && editingFileId === rowFileId;
                         const isPreviewing =
                           showPreview && previewingFileId === rowFileId;
+                        const isInspectingEncryptedData =
+                          showEncryptedData && encryptedDataFile?.id === rowFileId;
 
                         return (
                           <tr
@@ -837,33 +1108,90 @@ export default function Files() {
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
                                 <button
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-primary/20 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                                  disabled={!rowFileId || isPreviewing || isDownloading || isDeleting}
+                                  className="inline-flex items-center justify-center p-1.5 rounded-lg border border-primary/20 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  disabled={
+                                    !rowFileId ||
+                                    isPreviewing ||
+                                    isDownloading ||
+                                    isDeleting ||
+                                    isInspectingEncryptedData ||
+                                    isEditing
+                                  }
                                   onClick={() => openPreview(file)}
+                                  title={isPreviewing ? "Đang xem trước" : "Xem trước"}
                                   type="button"
                                 >
                                   <Eye size={14} />
-                                  {isPreviewing ? "Đang xem..." : "Preview"}
                                 </button>
                                 <button
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-primary/20 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                                  disabled={!rowFileId || isDownloading || isDeleting || isPreviewing}
-                                  onClick={() => handleDownload(rowFileId)}
-                                  type="button"
-                                >
-                                  <Download size={14} />
-                                  {isDownloading ? "Đang lấy link..." : "Tải xuống"}
-                                </button>
-                                <button
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-red-300 text-red-600 text-xs font-medium hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
-                                  disabled={!rowFileId || isDeleting || isDownloading || isPreviewing}
-                                  onClick={() =>
-                                    handleDelete(rowFileId, file.filename || "tệp tin này")
+                                  className="inline-flex items-center justify-center p-1.5 rounded-lg border border-primary/20 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  disabled={
+                                    !rowFileId ||
+                                    isDownloading ||
+                                    isDeleting ||
+                                    isPreviewing ||
+                                    isInspectingEncryptedData ||
+                                    isEditing
+                                  }
+                                  onClick={() => openEncryptedData(file)}
+                                  title={
+                                    isInspectingEncryptedData
+                                      ? "Đang xem dữ liệu mã hóa"
+                                      : "Xem dữ liệu mã hóa"
                                   }
                                   type="button"
                                 >
+                                  <FileCode2 size={14} />
+                                </button>
+                                <button
+                                  className="inline-flex items-center justify-center p-1.5 rounded-lg border border-primary/20 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  disabled={
+                                    !rowFileId ||
+                                    isDownloading ||
+                                    isDeleting ||
+                                    isPreviewing ||
+                                    isInspectingEncryptedData ||
+                                    isEditing
+                                  }
+                                  onClick={() => openEditFile(file)}
+                                  title={isEditing ? "Đang chỉnh sửa" : "Chỉnh sửa"}
+                                  type="button"
+                                >
+                                  <Pencil size={14} />
+                                </button>
+                                <button
+                                  className="inline-flex items-center justify-center p-1.5 rounded-lg border border-primary/20 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  disabled={
+                                    !rowFileId ||
+                                    isDownloading ||
+                                    isDeleting ||
+                                    isPreviewing ||
+                                    isInspectingEncryptedData ||
+                                    isEditing
+                                  }
+                                  onClick={() => handleDownload(rowFileId)}
+                                  title={isDownloading ? "Đang lấy link tải" : "Tải xuống"}
+                                  type="button"
+                                >
+                                  <Download size={14} />
+                                </button>
+                                <button
+                                  className="inline-flex items-center justify-center p-1.5 rounded-lg border border-red-300 text-red-600 text-xs font-medium hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  disabled={
+                                    !rowFileId ||
+                                    isDeleting ||
+                                    isDownloading ||
+                                    isPreviewing ||
+                                    isInspectingEncryptedData ||
+                                    isEditing
+                                  }
+                                  onClick={() =>
+                                    handleDelete(rowFileId, file.filename || "tệp tin này")
+                                  }
+                                  title={isDeleting ? "Đang xóa" : "Xóa"}
+                                  type="button"
+                                >
                                   <Trash2 size={14} />
-                                  {isDeleting ? "Đang xóa..." : "Xóa"}
                                 </button>
                               </div>
                             </td>
@@ -878,6 +1206,239 @@ export default function Files() {
           </div>
         </div>
       </main>
+
+      {showEditFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-xl border border-primary/20 bg-white dark:bg-slate-900 shadow-xl flex flex-col">
+            <div className="px-5 py-4 border-b border-primary/10 flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <h2 className="text-lg font-semibold">Chỉnh sửa tệp tin</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400 truncate">
+                  {editFile?.filename || "-"}
+                </p>
+              </div>
+              <button
+                className="px-3 py-1.5 rounded-lg border border-primary/20 text-sm hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={editLoading}
+                onClick={closeEditFile}
+                type="button"
+              >
+                Đóng
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4">
+              <form className="space-y-4" onSubmit={handleEditFile}>
+                <div>
+                  <label className="block text-sm font-medium mb-2" htmlFor="edit-filename">
+                    Tên tệp
+                  </label>
+                  <input
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-primary/20 rounded-lg text-sm"
+                    disabled={editLoading}
+                    id="edit-filename"
+                    onChange={(event) => setEditFilename(event.target.value)}
+                    placeholder="Nhập tên tệp"
+                    type="text"
+                    value={editFilename}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2" htmlFor="edit-access-mode">
+                    Chế độ truy cập
+                  </label>
+                  <select
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-primary/20 rounded-lg text-sm"
+                    disabled={editLoading}
+                    id="edit-access-mode"
+                    onChange={(event) => setEditAccessMode(event.target.value)}
+                    value={editAccessMode}
+                  >
+                    <option value="private">private</option>
+                    <option value="public">public</option>
+                    <option value="whitelist">whitelist</option>
+                  </select>
+                </div>
+
+                {editAccessMode === "whitelist" && (
+                  <div>
+                    <label className="block text-sm font-medium mb-2" htmlFor="edit-whitelist">
+                      Whitelist (mỗi dòng 1 user/email)
+                    </label>
+                    <textarea
+                      className="w-full min-h-[140px] px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-primary/20 rounded-lg text-sm"
+                      disabled={editLoading}
+                      id="edit-whitelist"
+                      onChange={(event) => setEditWhitelistText(event.target.value)}
+                      placeholder="alice@example.com&#10;bob@example.com"
+                      value={editWhitelistText}
+                    />
+                  </div>
+                )}
+
+                {editError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 px-3 py-2 text-sm dark:bg-red-950/30 dark:border-red-800 dark:text-red-300">
+                    {editError}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3">
+                  <button
+                    className="bg-primary text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={editLoading || !editFile?.id}
+                    type="submit"
+                  >
+                    {editLoading ? "Đang lưu..." : "Lưu thay đổi"}
+                  </button>
+                  <button
+                    className="px-4 py-2 rounded-lg font-medium border border-primary/20 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={editLoading}
+                    onClick={closeEditFile}
+                    type="button"
+                  >
+                    Hủy
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showEncryptedData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-xl border border-primary/20 bg-white dark:bg-slate-900 shadow-xl flex flex-col">
+            <div className="px-5 py-4 border-b border-primary/10 flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <h2 className="text-lg font-semibold">Dữ liệu mã hóa</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400 truncate">
+                  {encryptedDataFile?.filename || "-"}
+                </p>
+              </div>
+              <button
+                className="px-3 py-1.5 rounded-lg border border-primary/20 text-sm hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={encryptedDataLoading}
+                onClick={closeEncryptedData}
+                type="button"
+              >
+                Đóng
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4">
+              <div className="flex items-center gap-3">
+                <button
+                  className="bg-primary text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={encryptedDataLoading || !encryptedDataFile?.id}
+                  onClick={handleInspectEncryptedData}
+                  type="button"
+                >
+                  {encryptedDataLoading ? "Đang phân tích..." : "Tải & phân tích dữ liệu mã hóa"}
+                </button>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  Hiển thị header, chunk stats, hex/base64 bytes đầu
+                </span>
+              </div>
+
+              {encryptedDataLoading && encryptedDataStage && (
+                <div className="rounded-lg border border-primary/20 bg-primary/5 text-primary px-3 py-2 text-sm">
+                  {encryptedDataStage}
+                </div>
+              )}
+
+              {encryptedDataError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 px-3 py-2 text-sm dark:bg-red-950/30 dark:border-red-800 dark:text-red-300">
+                  {encryptedDataError}
+                </div>
+              )}
+
+              {!encryptedDataLoading && !encryptedDataError && !encryptedDataInfo && (
+                <div className="rounded-lg border border-primary/20 bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 px-3 py-2 text-sm">
+                  Bấm nút để tải bytes mã hóa và xem cấu trúc dữ liệu ciphertext.
+                </div>
+              )}
+
+              {!encryptedDataLoading && !encryptedDataError && encryptedDataInfo && (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      className="px-3 py-1.5 rounded-lg border border-primary/20 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800"
+                      onClick={() => handleCopyEncryptedData("hex")}
+                      type="button"
+                    >
+                      Copy Hex
+                    </button>
+                    <button
+                      className="px-3 py-1.5 rounded-lg border border-primary/20 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800"
+                      onClick={() => handleCopyEncryptedData("base64")}
+                      type="button"
+                    >
+                      Copy Base64
+                    </button>
+                    {encryptedDataCopyMessage && (
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                        {encryptedDataCopyMessage}
+                      </span>
+                    )}
+                  </div>
+                  <div className="rounded-lg border border-primary/10 bg-slate-50 dark:bg-slate-800/50 p-4 text-sm grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <p>
+                      <span className="font-semibold">Tổng bytes mã hóa:</span>{" "}
+                      {encryptedDataInfo.totalEncryptedBytes}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Header size:</span>{" "}
+                      {encryptedDataInfo.headerSize}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Key byte:</span>{" "}
+                      {encryptedDataInfo.keyByte}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Key length:</span>{" "}
+                      {encryptedDataInfo.keyLength} bytes
+                    </p>
+                    <p className="md:col-span-2 break-all">
+                      <span className="font-semibold">Salt (hex):</span>{" "}
+                      {encryptedDataInfo.saltHex}
+                    </p>
+                    <p className="md:col-span-2 break-all">
+                      <span className="font-semibold">Base nonce (hex):</span>{" "}
+                      {encryptedDataInfo.baseNonceHex}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Số chunk:</span>{" "}
+                      {encryptedDataInfo.chunkCount}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Cipher payload bytes:</span>{" "}
+                      {encryptedDataInfo.totalCipherPayloadBytes}
+                    </p>
+                    <p className="md:col-span-2 text-xs text-slate-500 dark:text-slate-400">
+                      {encryptedDataInfo.truncated}
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-semibold">Hex dump (bytes đầu)</h3>
+                    <pre className="rounded-lg border border-primary/10 bg-slate-50 dark:bg-slate-800/50 p-4 text-xs whitespace-pre-wrap break-all max-h-[28vh] overflow-auto">
+                      {encryptedDataInfo.previewHex}
+                    </pre>
+                  </div>
+
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-semibold">Base64 (bytes đầu)</h3>
+                    <pre className="rounded-lg border border-primary/10 bg-slate-50 dark:bg-slate-800/50 p-4 text-xs whitespace-pre-wrap break-all max-h-[22vh] overflow-auto">
+                      {encryptedDataInfo.previewBase64}
+                    </pre>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {showPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
