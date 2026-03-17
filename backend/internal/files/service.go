@@ -3,6 +3,7 @@ package files
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -32,15 +33,38 @@ type FileRepo interface {
 	Delete(ctx context.Context, id string) error
 }
 
-type Service struct {
-	r2       R2Storage
-	fileRepo FileRepo
+type UserStorageRepo interface {
+	GetByUserID(ctx context.Context, userID string) (*models.UserStorage, error)
+	AdjustUsage(ctx context.Context, userID string, usedBytesDelta, fileCountDelta int64) error
+	SetUsageIfEmpty(ctx context.Context, userID string, usedBytes, fileCount int64) error
 }
 
-func NewService(r2 R2Storage, fileRepo FileRepo) *Service {
+var (
+	ErrFileTooLarge = errors.New("file size exceeds 1GB limit")
+	ErrStorageQuota = errors.New("storage quota exceeded")
+)
+
+type StorageUsageResponse struct {
+	UsedBytes      int64   `json:"used_bytes"`
+	QuotaBytes     int64   `json:"quota_bytes"`
+	UsedGB         float64 `json:"used_gb"`
+	QuotaGB        float64 `json:"quota_gb"`
+	PercentUsed    float64 `json:"percent_used"`
+	FileCount      int64   `json:"file_count"`
+	AvailableBytes int64   `json:"available_bytes"`
+}
+
+type Service struct {
+	r2              R2Storage
+	fileRepo        FileRepo
+	userStorageRepo UserStorageRepo
+}
+
+func NewService(r2 R2Storage, fileRepo FileRepo, userStorageRepo UserStorageRepo) *Service {
 	return &Service{
-		r2:       r2,
-		fileRepo: fileRepo,
+		r2:              r2,
+		fileRepo:        fileRepo,
+		userStorageRepo: userStorageRepo,
 	}
 }
 
@@ -57,6 +81,18 @@ type UploadInput struct {
 
 // Upload stream mã hóa file và đẩy lên R2, lưu metadata vào MongoDB.
 func (s *Service) Upload(ctx context.Context, input UploadInput) (*models.FileMetadata, error) {
+	if input.Size > models.MaxFileSizeBytes {
+		return nil, ErrFileTooLarge
+	}
+
+	usage, err := s.userStorageRepo.GetByUserID(ctx, input.OwnerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load storage usage: %w", err)
+	}
+	if usage.UsedBytes+input.Size > usage.QuotaBytes {
+		return nil, ErrStorageQuota
+	}
+
 	// Sinh unique key cho R2
 	ext := filepath.Ext(input.Filename)
 	storageKey := fmt.Sprintf("%s/%s%s", input.OwnerID, uuid.New().String(), ext)
@@ -128,6 +164,12 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (*models.FileMe
 		// Rollback: xóa file vừa upload nếu lưu DB thất bại
 		_ = s.r2.DeleteFile(ctx, storageKey)
 		return nil, fmt.Errorf("failed to save metadata: %w", err)
+	}
+
+	if err := s.userStorageRepo.AdjustUsage(ctx, input.OwnerID, input.Size, 1); err != nil {
+		_ = s.r2.DeleteFile(ctx, storageKey)
+		_ = s.fileRepo.Delete(ctx, file.ID.Hex())
+		return nil, fmt.Errorf("failed to update storage usage: %w", err)
 	}
 
 	return file, nil
@@ -230,12 +272,70 @@ func (s *Service) Delete(ctx context.Context, fileID, ownerID string) error {
 		return err
 	}
 
-	return s.fileRepo.Delete(ctx, fileID)
+	if err := s.fileRepo.Delete(ctx, fileID); err != nil {
+		return err
+	}
+
+	return s.userStorageRepo.AdjustUsage(ctx, ownerID, -file.Size, -1)
 }
 
 // ListFiles trả về danh sách file của owner
 func (s *Service) ListFiles(ctx context.Context, ownerID string) ([]*models.FileMetadata, error) {
 	return s.fileRepo.FindByOwner(ctx, ownerID)
+}
+
+func (s *Service) GetMyStorage(ctx context.Context, userID string) (*StorageUsageResponse, error) {
+	usage, err := s.userStorageRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if usage.UsedBytes == 0 && usage.FileCount == 0 {
+		files, err := s.fileRepo.FindByOwner(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(files) > 0 {
+			var totalBytes int64
+			for _, file := range files {
+				totalBytes += file.Size
+			}
+			totalFiles := int64(len(files))
+
+			if err := s.userStorageRepo.SetUsageIfEmpty(ctx, userID, totalBytes, totalFiles); err != nil {
+				log.Printf("[storage.debug] failed to backfill usage for user=%s: %v", userID, err)
+			}
+
+			usage.UsedBytes = totalBytes
+			usage.FileCount = totalFiles
+		}
+	}
+
+	available := usage.QuotaBytes - usage.UsedBytes
+	if available < 0 {
+		available = 0
+	}
+
+	quotaGB := float64(usage.QuotaBytes) / float64(models.BytesPerGB)
+	usedGB := float64(usage.UsedBytes) / float64(models.BytesPerGB)
+	percentUsed := 0.0
+	if usage.QuotaBytes > 0 {
+		percentUsed = (float64(usage.UsedBytes) / float64(usage.QuotaBytes)) * 100
+	}
+	if percentUsed > 100 {
+		percentUsed = 100
+	}
+
+	return &StorageUsageResponse{
+		UsedBytes:      usage.UsedBytes,
+		QuotaBytes:     usage.QuotaBytes,
+		UsedGB:         usedGB,
+		QuotaGB:        quotaGB,
+		PercentUsed:    percentUsed,
+		FileCount:      usage.FileCount,
+		AvailableBytes: available,
+	}, nil
 }
 
 func contains(slice []string, item string) bool {

@@ -1,5 +1,116 @@
-basePath: /api/v1
 definitions:
+  github_com_aeshield_backend_internal_accesscontrol_models.AccessRule:
+    properties:
+      access_mode:
+        allOf:
+        - $ref: '#/definitions/models.AccessMode'
+        description: Chế độ truy cập
+      created_at:
+        type: string
+      id:
+        type: string
+      owner_id:
+        description: ID của chủ sở hữu
+        type: string
+      resource_id:
+        description: ID của tài nguyên cần kiểm soát
+        type: string
+      resource_type:
+        description: Loại tài nguyên (file, folder, etc.)
+        type: string
+      updated_at:
+        type: string
+      whitelist:
+        description: Danh sách người dùng được phép
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_aeshield_backend_internal_accesscontrol_models.CheckAccessResult:
+    properties:
+      error:
+        description: Lỗi nếu có
+      hasAccess:
+        description: Có quyền truy cập hay không
+        type: boolean
+      reason:
+        description: Lý do (cho mục đích ghi log)
+        type: string
+    type: object
+  handler.CheckAccessRequest:
+    properties:
+      resource_id:
+        type: string
+    type: object
+  handler.CreateRuleRequest:
+    properties:
+      access_mode:
+        type: string
+      resource_id:
+        type: string
+      resource_type:
+        type: string
+      whitelist:
+        items:
+          type: string
+        type: array
+    type: object
+  handler.UpdateRuleRequest:
+    properties:
+      access_mode:
+        type: string
+      whitelist:
+        items:
+          type: string
+        type: array
+    type: object
+  handler.WhitelistRequest:
+    properties:
+      resource_id:
+        type: string
+      user_identifier:
+        type: string
+    type: object
+  internal_files.StorageUsageResponse:
+    properties:
+      available_bytes:
+        type: integer
+      file_count:
+        type: integer
+      percent_used:
+        type: number
+      quota_bytes:
+        type: integer
+      quota_gb:
+        type: number
+      used_bytes:
+        type: integer
+      used_gb:
+        type: number
+    type: object
+  internal_files.shareRequest:
+    properties:
+      access_mode:
+        type: string
+      file_id:
+        type: string
+      filename:
+        type: string
+      whitelist:
+        items:
+          type: string
+        type: array
+    type: object
+  models.AccessMode:
+    enum:
+    - public
+    - private
+    - whitelist
+    type: string
+    x-enum-varnames:
+    - AccessModePublic
+    - AccessModePrivate
+    - AccessModeWhitelist
   models.Claims:
     properties:
       avatar:
@@ -15,20 +126,370 @@ definitions:
       user_id:
         type: string
     type: object
-host: localhost:8080
+  models.FileMetadata:
+    properties:
+      access_mode:
+        type: string
+      created_at:
+        type: string
+      encryption_type:
+        type: string
+      filename:
+        type: string
+      id:
+        type: string
+      owner_id:
+        type: string
+      public_cid:
+        type: string
+      size:
+        type: integer
+      storage_path:
+        type: string
+      updated_at:
+        type: string
+      whitelist:
+        items:
+          type: string
+        type: array
+    type: object
 info:
-  contact:
-    email: support@aeshield.io
-    name: API Support
-    url: http://localhost:8080/support
-  description: Secure file storage API with client-side encryption
-  license:
-    name: Apache 2.0
-    url: http://www.apache.org/licenses/LICENSE-2.0.html
-  termsOfService: http://localhost:8080/terms
-  title: AEShield API
-  version: "1.0"
+  contact: {}
 paths:
+  /access/check:
+    post:
+      consumes:
+      - application/json
+      description: Kiểm tra xem người dùng có quyền truy cập tài nguyên hay không
+      parameters:
+      - description: Thông tin kiểm tra quyền truy cập
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CheckAccessRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_aeshield_backend_internal_accesscontrol_models.CheckAccessResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Kiểm tra quyền truy cập
+      tags:
+      - access-control
+  /access/rules:
+    post:
+      consumes:
+      - application/json
+      description: Tạo quy tắc truy cập mới cho tài nguyên
+      parameters:
+      - description: Thông tin quy tắc truy cập
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateRuleRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_aeshield_backend_internal_accesscontrol_models.AccessRule'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Tạo mới quy tắc truy cập
+      tags:
+      - access-control
+  /access/rules/{resource_id}:
+    delete:
+      description: Xóa quy tắc truy cập cho tài nguyên (chỉ chủ sở hữu)
+      parameters:
+      - description: ID của tài nguyên
+        in: path
+        name: resource_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Xóa quy tắc truy cập
+      tags:
+      - access-control
+    get:
+      description: Lấy thông tin quy tắc truy cập theo ID tài nguyên
+      parameters:
+      - description: ID của tài nguyên
+        in: path
+        name: resource_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_aeshield_backend_internal_accesscontrol_models.AccessRule'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Lấy quy tắc truy cập
+      tags:
+      - access-control
+    patch:
+      consumes:
+      - application/json
+      description: Cập nhật quy tắc truy cập cho tài nguyên (chỉ chủ sở hữu)
+      parameters:
+      - description: ID của tài nguyên
+        in: path
+        name: resource_id
+        required: true
+        type: string
+      - description: Thông tin cập nhật quy tắc
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.UpdateRuleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_aeshield_backend_internal_accesscontrol_models.AccessRule'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Cập nhật quy tắc truy cập
+      tags:
+      - access-control
+  /access/whitelist:
+    delete:
+      consumes:
+      - application/json
+      description: Xóa người dùng khỏi danh sách trắng của tài nguyên (chỉ chủ sở
+        hữu)
+      parameters:
+      - description: Thông tin xóa khỏi danh sách trắng
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.WhitelistRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_aeshield_backend_internal_accesscontrol_models.AccessRule'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Xóa khỏi danh sách trắng
+      tags:
+      - access-control
+    post:
+      consumes:
+      - application/json
+      description: Thêm người dùng vào danh sách trắng của tài nguyên (chỉ chủ sở
+        hữu)
+      parameters:
+      - description: Thông tin thêm vào danh sách trắng
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.WhitelistRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_aeshield_backend_internal_accesscontrol_models.AccessRule'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Thêm vào danh sách trắng
+      tags:
+      - access-control
   /auth/github:
     get:
       consumes:
@@ -50,7 +511,8 @@ paths:
     get:
       consumes:
       - application/json
-      description: Exchange GitHub authorization code for JWT token
+      description: Exchange GitHub authorization code for JWT token and create/update
+        user
       parameters:
       - description: Authorization code
         in: query
@@ -101,7 +563,8 @@ paths:
     get:
       consumes:
       - application/json
-      description: Exchange Google authorization code for JWT token
+      description: Exchange Google authorization code for JWT token and create/update
+        user
       parameters:
       - description: Authorization code
         in: query
@@ -165,10 +628,221 @@ paths:
       summary: Get OAuth URLs
       tags:
       - auth
-securityDefinitions:
-  BearerAuth:
-    description: Type "Bearer" followed by a space and JWT token.
-    in: header
-    name: Authorization
-    type: apiKey
+  /files:
+    get:
+      description: Lấy danh sách file của user hiện tại
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.FileMetadata'
+            type: array
+      security:
+      - BearerAuth: []
+      summary: List files
+      tags:
+      - files
+  /files/{id}:
+    delete:
+      description: Xóa file trên R2 và metadata trong MongoDB
+      parameters:
+      - description: File ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete file
+      tags:
+      - files
+  /files/{id}/download:
+    get:
+      description: Kiểm tra quyền và trả về presigned URL để download
+      parameters:
+      - description: File ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Download file
+      tags:
+      - files
+  /files/share:
+    patch:
+      consumes:
+      - application/json
+      description: Cập nhật access mode và/hoặc whitelist của file (chỉ owner)
+      parameters:
+      - description: Share settings
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_files.shareRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.FileMetadata'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Share file
+      tags:
+      - files
+  /files/upload:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Upload và lưu metadata file (stream mã hóa AES-GCM, không buffer
+        toàn bộ vào RAM)
+      parameters:
+      - description: File cần upload
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Mật khẩu mã hóa file
+        in: formData
+        name: password
+        required: true
+        type: string
+      - description: AES-128 | AES-192 | AES-256
+        in: formData
+        name: encryption_type
+        type: string
+      - description: public | private | whitelist
+        in: formData
+        name: access_mode
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.FileMetadata'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Upload file
+      tags:
+      - files
+  /storage/me:
+    get:
+      description: Lấy thông tin dung lượng đã dùng/quota của user hiện tại
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_files.StorageUsageResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get my storage usage
+      tags:
+      - storage
 swagger: "2.0"

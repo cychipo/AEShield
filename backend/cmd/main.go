@@ -57,7 +57,11 @@ func main() {
 	if err := fileRepo.CreateIndexes(context.Background()); err != nil {
 		log.Printf("Warning: failed to create file indexes: %v", err)
 	}
-	fileService := files.NewService(r2Client, fileRepo)
+	userStorageRepo := storage.NewUserStorageRepository(database.GetDB().Database)
+	if err := userStorageRepo.CreateIndexes(context.Background()); err != nil {
+		log.Printf("Warning: failed to create user_storage indexes: %v", err)
+	}
+	fileService := files.NewService(r2Client, fileRepo, userStorageRepo)
 	fileHandler := files.NewHandler(fileService)
 
 	app := fiber.New(fiber.Config{
@@ -97,6 +101,7 @@ func main() {
 	app.Delete("/api/v1/files/:id", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Delete)
 	app.Patch("/api/v1/files/share", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Share)
 	app.Patch("/api/v1/files/:id", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Share)
+	app.Get("/api/v1/storage/me", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.GetMyStorage)
 
 	// Serve frontend static files
 	app.Static("/", frontendDist)

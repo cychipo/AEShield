@@ -12,8 +12,6 @@ import {
   Database,
   ShieldAlert,
   FileText,
-  Image,
-  FolderArchive,
   CloudUpload,
   Radar,
   ShieldCheck,
@@ -24,6 +22,16 @@ const API_BASE_URL =
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
+  const [storageUsage, setStorageUsage] = useState({
+    used_bytes: 0,
+    quota_bytes: 10 * 1024 * 1024 * 1024,
+    used_gb: 0,
+    quota_gb: 10,
+    percent_used: 0,
+    file_count: 0,
+    available_bytes: 10 * 1024 * 1024 * 1024,
+  });
+  const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
@@ -49,6 +57,39 @@ export default function Dashboard() {
       if (response.ok) {
         const userData = await response.json();
         setUser(userData);
+
+        const [storageResponse, filesResponse] = await Promise.all([
+          fetch(`${API_BASE_URL}/storage/me`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }),
+          fetch(`${API_BASE_URL}/files`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }),
+        ]);
+
+        if (storageResponse.ok) {
+          const storageData = await storageResponse.json();
+          setStorageUsage(storageData);
+        } else if (storageResponse.status === 401) {
+          localStorage.removeItem("aeshield_token");
+          localStorage.removeItem("aeshield_user");
+          navigate("/", { replace: true });
+          return;
+        }
+
+        if (filesResponse.ok) {
+          const filesData = await filesResponse.json();
+          setFiles(Array.isArray(filesData) ? filesData : []);
+        } else if (filesResponse.status === 401) {
+          localStorage.removeItem("aeshield_token");
+          localStorage.removeItem("aeshield_user");
+          navigate("/", { replace: true });
+          return;
+        }
       } else {
         localStorage.removeItem("aeshield_token");
         localStorage.removeItem("aeshield_user");
@@ -64,12 +105,6 @@ export default function Dashboard() {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("aeshield_token");
-    localStorage.removeItem("aeshield_user");
-    navigate("/", { replace: true });
-  };
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark">
@@ -80,6 +115,26 @@ export default function Dashboard() {
       </div>
     );
   }
+
+  const isNearQuota = storageUsage.percent_used >= 90;
+
+  const formatStorageValue = (bytes) => {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+      return "0 KB";
+    }
+
+    if (bytes >= 1024 * 1024 * 1024) {
+      return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    }
+
+    if (bytes >= 1024 * 1024) {
+      return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    }
+
+    return `${(bytes / 1024).toFixed(2)} KB`;
+  };
+
+  const recentFiles = files.slice(0, 4);
 
   return (
     <div className="flex h-screen overflow-hidden bg-background-light dark:bg-background-dark">
@@ -135,12 +190,12 @@ export default function Dashboard() {
             </p>
             <div className="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full mb-2">
               <div
-                className="bg-primary h-1.5 rounded-full"
-                style={{ width: "64%" }}
+                className={`${isNearQuota ? "bg-red-500" : "bg-primary"} h-1.5 rounded-full`}
+                style={{ width: `${Math.min(storageUsage.percent_used || 0, 100)}%` }}
               ></div>
             </div>
             <p className="text-xs text-slate-600 dark:text-slate-400">
-              64.2 GB / 100 GB đã sử dụng
+              {formatStorageValue(storageUsage.used_bytes)} / {formatStorageValue(storageUsage.quota_bytes)} đã sử dụng
             </p>
           </div>
         </div>
@@ -191,6 +246,12 @@ export default function Dashboard() {
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-8">
           <div className="max-w-6xl mx-auto space-y-8">
+            {isNearQuota && (
+              <div className="border border-red-300 bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-300 rounded-xl px-4 py-3 text-sm font-medium">
+                Cảnh báo: Dung lượng lưu trữ đã đạt {storageUsage.percent_used.toFixed(2)}%. Vui lòng xóa bớt tệp để tránh gián đoạn upload.
+              </div>
+            )}
+
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-primary/10 shadow-sm">
@@ -205,7 +266,7 @@ export default function Dashboard() {
                 <h3 className="text-slate-500 text-sm font-medium">
                   Tổng tệp tin đã mã hóa
                 </h3>
-                <p className="text-3xl font-bold mt-1">12,482</p>
+                <p className="text-3xl font-bold mt-1">{storageUsage.file_count || 0}</p>
               </div>
               <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-primary/10 shadow-sm">
                 <div className="flex justify-between items-start mb-4">
@@ -219,7 +280,7 @@ export default function Dashboard() {
                 <h3 className="text-slate-500 text-sm font-medium">
                   Dung lượng đã sử dụng
                 </h3>
-                <p className="text-3xl font-bold mt-1">64.2 GB</p>
+                <p className="text-3xl font-bold mt-1">{formatStorageValue(storageUsage.used_bytes)}</p>
               </div>
               <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-primary/10 shadow-sm">
                 <div className="flex justify-between items-start mb-4">
@@ -257,66 +318,39 @@ export default function Dashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-primary/5">
-                      <tr className="hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-                        <td className="px-6 py-4 font-medium flex items-center gap-2">
-                          <FileText size={18} className="text-slate-400" />
-                          bao_cao_nam_2023.pdf
-                        </td>
-                        <td className="px-6 py-4 text-sm">Mã hóa</td>
-                        <td className="px-6 py-4">
-                          <span className="px-2 py-1 bg-emerald-500/10 text-emerald-500 text-xs rounded-full font-medium">
-                            Hoàn thành
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-slate-500">
-                          2 phút trước
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-                        <td className="px-6 py-4 font-medium flex items-center gap-2">
-                          <Image size={18} className="text-slate-400" />
-                          sao_luu_server.iso
-                        </td>
-                        <td className="px-6 py-4 text-sm">Tải lên Cloud</td>
-                        <td className="px-6 py-4">
-                          <span className="px-2 py-1 bg-blue-500/10 text-blue-500 text-xs rounded-full font-medium">
-                            Đang xử lý
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-slate-500">
-                          14 phút trước
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-                        <td className="px-6 py-4 font-medium flex items-center gap-2">
-                          <Lock size={18} className="text-slate-400" />
-                          thong_tin_dang_nhap.txt
-                        </td>
-                        <td className="px-6 py-4 text-sm">Xoay khóa</td>
-                        <td className="px-6 py-4">
-                          <span className="px-2 py-1 bg-emerald-500/10 text-emerald-500 text-xs rounded-full font-medium">
-                            Hoàn thành
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-slate-500">
-                          1 giờ trước
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-                        <td className="px-6 py-4 font-medium flex items-center gap-2">
-                          <FolderArchive size={18} className="text-slate-400" />
-                          ma_nguon_du_an.zip
-                        </td>
-                        <td className="px-6 py-4 text-sm">Quét lỗ hổng</td>
-                        <td className="px-6 py-4">
-                          <span className="px-2 py-1 bg-emerald-500/10 text-emerald-500 text-xs rounded-full font-medium">
-                            Hoàn thành
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-slate-500">
-                          3 giờ trước
-                        </td>
-                      </tr>
+                      {recentFiles.length === 0 ? (
+                        <tr>
+                          <td
+                            className="px-6 py-6 text-sm text-slate-500"
+                            colSpan={4}
+                          >
+                            Chưa có dữ liệu tệp tin.
+                          </td>
+                        </tr>
+                      ) : (
+                        recentFiles.map((file) => (
+                          <tr
+                            className="hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                            key={file.id || file.storage_path || file.filename}
+                          >
+                            <td className="px-6 py-4 font-medium flex items-center gap-2">
+                              <FileText size={18} className="text-slate-400" />
+                              {file.filename || "-"}
+                            </td>
+                            <td className="px-6 py-4 text-sm">Mã hóa</td>
+                            <td className="px-6 py-4">
+                              <span className="px-2 py-1 bg-emerald-500/10 text-emerald-500 text-xs rounded-full font-medium">
+                                {file.encryption_type || "AES"}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-slate-500">
+                              {file.updated_at
+                                ? new Date(file.updated_at).toLocaleString("vi-VN")
+                                : "-"}
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>

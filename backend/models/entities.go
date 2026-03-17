@@ -58,3 +58,22 @@ const (
 	AccessModePrivate   AccessMode = "private"
 	AccessModeWhitelist AccessMode = "whitelist"
 )
+
+const (
+	BytesPerGB            int64 = 1024 * 1024 * 1024
+	MaxFileSizeBytes      int64 = 1 * BytesPerGB
+	DefaultUserQuotaBytes int64 = 10 * BytesPerGB
+)
+
+type UserStorage struct {
+	ID         primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	UserID     string             `bson:"user_id" json:"user_id"`
+	UsedBytes  int64              `bson:"used_bytes" json:"used_bytes"`
+	FileCount  int64              `bson:"file_count" json:"file_count"`
+	QuotaBytes int64              `bson:"quota_bytes" json:"quota_bytes"`
+	UpdatedAt  time.Time          `bson:"updated_at" json:"updated_at"`
+}
+
+func (UserStorage) CollectionName() string {
+	return "user_storage"
+}

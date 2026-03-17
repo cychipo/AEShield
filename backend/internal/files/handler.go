@@ -1,6 +1,7 @@
 package files
 
 import (
+	"context"
 	"log"
 
 	"github.com/aeshield/backend/internal/storage"
@@ -8,11 +9,20 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-type Handler struct {
-	service *Service
+type FileService interface {
+	Upload(ctx context.Context, input UploadInput) (*models.FileMetadata, error)
+	GetDownloadURL(ctx context.Context, fileID, requesterID string) (string, error)
+	Delete(ctx context.Context, fileID, ownerID string) error
+	ListFiles(ctx context.Context, ownerID string) ([]*models.FileMetadata, error)
+	Share(ctx context.Context, input ShareInput) (*models.FileMetadata, error)
+	GetMyStorage(ctx context.Context, userID string) (*StorageUsageResponse, error)
 }
 
-func NewHandler(service *Service) *Handler {
+type Handler struct {
+	service FileService
+}
+
+func NewHandler(service FileService) *Handler {
 	return &Handler{service: service}
 }
 
@@ -31,6 +41,7 @@ func NewHandler(service *Service) *Handler {
 //	@Success		201				{object}	models.FileMetadata
 //	@Failure		400				{object}	map[string]string
 //	@Failure		401				{object}	map[string]string
+//	@Failure		413				{object}	map[string]string
 //	@Failure		500				{object}	map[string]string
 //	@Router			/files/upload [post]
 func (h *Handler) Upload(c *fiber.Ctx) error {
@@ -84,6 +95,9 @@ func (h *Handler) Upload(c *fiber.Ctx) error {
 		Body:           src,
 	})
 	if err != nil {
+		if err == ErrFileTooLarge || err == ErrStorageQuota {
+			return c.Status(fiber.StatusRequestEntityTooLarge).JSON(fiber.Map{"error": err.Error()})
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -171,6 +185,31 @@ func (h *Handler) ListFiles(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fileList)
+}
+
+// GetMyStorage godoc
+//
+//	@Summary		Get my storage usage
+//	@Description	Lấy thông tin dung lượng đã dùng/quota của user hiện tại
+//	@Tags			storage
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Success		200	{object}	StorageUsageResponse
+//	@Failure		401	{object}	map[string]string
+//	@Failure		500	{object}	map[string]string
+//	@Router			/storage/me [get]
+func (h *Handler) GetMyStorage(c *fiber.Ctx) error {
+	claims := getUserClaims(c)
+	if claims == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	usage, err := h.service.GetMyStorage(c.Context(), claims.UserID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(usage)
 }
 
 // Share godoc

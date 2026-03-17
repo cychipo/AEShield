@@ -91,6 +91,9 @@ Stream mã hóa file và lưu lên Cloudflare R2.
 }
 ```
 
+**Lỗi:**
+- `413` — file vượt quá 1 GB hoặc vượt quota 10 GB của user
+
 ---
 
 ### GET /files
@@ -148,6 +151,28 @@ Xóa file trên R2 và metadata trong MongoDB. Chỉ owner.
 
 ---
 
+## Storage
+
+Tất cả endpoints dưới đây yêu cầu `Authorization: Bearer <token>`.
+
+### GET /storage/me
+Lấy thông tin dung lượng lưu trữ của user hiện tại.
+
+**Response `200`:**
+```json
+{
+  "used_bytes": 2147483648,
+  "quota_bytes": 10737418240,
+  "used_gb": 2.0,
+  "quota_gb": 10.0,
+  "percent_used": 20.0,
+  "file_count": 12,
+  "available_bytes": 8589934592
+}
+```
+
+---
+
 ## Response Lỗi Chuẩn
 
 ```json
@@ -160,4 +185,5 @@ Xóa file trên R2 và metadata trong MongoDB. Chỉ owner.
 | `401` | JWT thiếu hoặc không hợp lệ |
 | `403` | Không có quyền truy cập |
 | `404` | Tài nguyên không tìm thấy |
+| `413` | Payload quá lớn hoặc vượt quota |
 | `500` | Lỗi server nội bộ |
