@@ -31,15 +31,15 @@ type Config struct {
 
 func Load() *Config {
 	return &Config{
-		Port:               getEnv("PORT", "6868"),
+		Port:               getEnv("PORT", "6888"),
 		FrontendURL:        getEnv("FRONTEND_URL", "http://localhost:5173"),
 		JWTSecret:          getEnv("JWT_SECRET", "your-secret-key-change-in-production"),
 		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
 		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
-		GoogleRedirectURL:  getEnv("GOOGLE_REDIRECT_URL", "http://localhost:3000/auth/google/callback"),
+		GoogleRedirectURL:  getEnv("GOOGLE_REDIRECT_URL", "http://localhost:6888/api/v1/auth/google/callback"),
 		GitHubClientID:     getEnv("GITHUB_CLIENT_ID", ""),
 		GitHubClientSecret: getEnv("GITHUB_CLIENT_SECRET", ""),
-		GitHubRedirectURL:  getEnv("GITHUB_REDIRECT_URL", "http://localhost:3000/auth/github/callback"),
+		GitHubRedirectURL:  getEnv("GITHUB_REDIRECT_URL", "http://localhost:6888/api/v1/auth/github/callback"),
 		MongoURI:           getEnv("MONGO_URI", "mongodb://localhost:27017"),
 		MongoDatabase:      getEnv("MONGO_DATABASE", "aeshield"),
 		R2AccountID:        getEnv("R2_ACCOUNT_ID", ""),

@@ -3,10 +3,10 @@
     "info": {
         "description": "Secure file storage API with client-side encryption",
         "title": "AEShield API",
-        "termsOfService": "http://localhost:6868/terms",
+        "termsOfService": "http://localhost:6888/terms",
         "contact": {
             "name": "API Support",
-            "url": "http://localhost:6868/support",
+            "url": "http://localhost:6888/support",
             "email": "support@aeshield.io"
         },
         "license": {
@@ -15,7 +15,7 @@
         },
         "version": "1.0"
     },
-    "host": "localhost:6868",
+    "host": "localhost:6888",
     "basePath": "/api/v1",
     "paths": {
         "/auth/github": {

@@ -33,9 +33,12 @@ type mockR2 struct {
 	deletedKeys  []string
 }
 
-func (m *mockR2) UploadFile(_ context.Context, key string, _ io.Reader, _ string, _ int64) error {
+func (m *mockR2) UploadFile(_ context.Context, key string, _ io.Reader, _ string, size int64) error {
 	if m.uploadErr != nil {
 		return m.uploadErr
+	}
+	if size <= 0 {
+		return fmt.Errorf("content length must be positive")
 	}
 	m.uploadedKeys = append(m.uploadedKeys, key)
 	return nil
@@ -233,6 +236,7 @@ func TestUpload_DBFails_RollbackR2(t *testing.T) {
 	_, err := svc.Upload(context.Background(), UploadInput{
 		OwnerID:        "user-1",
 		Filename:       "file.txt",
+		Size:           4,
 		EncryptionType: "AES-256",
 		Password:       "secret",
 		Body:           strings.NewReader("data"),
@@ -242,6 +246,31 @@ func TestUpload_DBFails_RollbackR2(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to save metadata")
 	// Phải rollback xóa file trên R2
 	assert.Len(t, r2.deletedKeys, 1)
+}
+
+func TestEncryptedSizeFromPlaintextSize(t *testing.T) {
+	assert.Equal(t, int64(33), encryptedSizeFromPlaintextSize(0))
+	assert.Equal(t, int64(54), encryptedSizeFromPlaintextSize(1))
+	assert.Equal(t, int64(65589), encryptedSizeFromPlaintextSize(65536))
+	assert.Equal(t, int64(65610), encryptedSizeFromPlaintextSize(65537))
+}
+
+func TestUpload_SizeZero_FallbackBufferStillUploads(t *testing.T) {
+	r2 := &mockR2{}
+	repo := newMockFileRepo()
+	svc := newTestService(r2, repo)
+
+	_, err := svc.Upload(context.Background(), UploadInput{
+		OwnerID:        "user-1",
+		Filename:       "unknown.bin",
+		Size:           0,
+		EncryptionType: "AES-256",
+		Password:       "secret",
+		Body:           strings.NewReader("payload"),
+	})
+
+	require.NoError(t, err)
+	assert.Len(t, r2.uploadedKeys, 1)
 }
 
 // ---------------------------------------------------------------------------

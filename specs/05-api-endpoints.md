@@ -3,7 +3,7 @@
 ## Base URL
 
 ```
-Development: http://localhost:3000/api/v1
+Development: http://localhost:6888/api/v1
 Production:  https://api.aeshield.com/api/v1
 ```
 

@@ -63,11 +63,11 @@ type Claims struct {
 ```env
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
-GOOGLE_REDIRECT_URL=http://localhost:3000/auth/google/callback
+GOOGLE_REDIRECT_URL=http://localhost:6888/api/v1/auth/google/callback
 
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
-GITHUB_REDIRECT_URL=http://localhost:3000/auth/github/callback
+GITHUB_REDIRECT_URL=http://localhost:6888/api/v1/auth/github/callback
 
 JWT_SECRET=
 JWT_EXPIRY=168h

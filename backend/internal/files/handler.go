@@ -1,6 +1,8 @@
 package files
 
 import (
+	"log"
+
 	"github.com/aeshield/backend/internal/storage"
 	"github.com/aeshield/backend/models"
 	"github.com/gofiber/fiber/v2"
@@ -68,6 +70,8 @@ func (h *Handler) Upload(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "cannot open file"})
 	}
 	defer src.Close()
+
+	log.Printf("[upload.debug] handler receive owner=%s filename=%q size=%d contentType=%q encryption=%s access=%s", claims.UserID, fileHeader.Filename, fileHeader.Size, fileHeader.Header.Get("Content-Type"), encryptionType, accessMode)
 
 	result, err := h.service.Upload(c.Context(), UploadInput{
 		OwnerID:        claims.UserID,

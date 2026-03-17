@@ -1,10 +1,11 @@
 package files
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
-	"mime"
+	"log"
 	"path/filepath"
 	"time"
 
@@ -59,15 +60,6 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (*models.FileMe
 	ext := filepath.Ext(input.Filename)
 	storageKey := fmt.Sprintf("%s/%s%s", input.OwnerID, uuid.New().String(), ext)
 
-	// Detect content type nếu chưa có
-	contentType := input.ContentType
-	if contentType == "" || contentType == "application/octet-stream" {
-		contentType = mime.TypeByExtension(ext)
-		if contentType == "" {
-			contentType = "application/octet-stream"
-		}
-	}
-
 	// Map encryption type → KeyBits
 	bits, err := encryptionTypeToBits(input.EncryptionType)
 	if err != nil {
@@ -81,6 +73,7 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (*models.FileMe
 
 	// Pipe: mã hóa streaming → R2 upload
 	pr, pw := io.Pipe()
+	log.Printf("[upload.debug] service start owner=%s filename=%q plainSize=%d", input.OwnerID, input.Filename, input.Size)
 
 	// Goroutine ghi ciphertext vào pipe writer
 	var encryptErr error
@@ -95,11 +88,24 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (*models.FileMe
 		_, encryptErr = crypto.Encrypt(pw, input.Body, input.Password, bits)
 	}()
 
-	// Upload từ pipe reader lên R2 (size = -1 vì ciphertext lớn hơn plaintext)
-	if err := s.r2.UploadFile(ctx, storageKey, pr, "application/octet-stream", -1); err != nil {
+	// Upload lên R2 cần Content-Length chính xác và body có thể đọc ổn định.
+	// Để tránh lỗi chữ ký với stream không seekable, buffer ciphertext trước khi PutObject.
+	predictedEncryptedSize := encryptedSizeFromPlaintextSize(input.Size)
+	encryptedData, err := io.ReadAll(pr)
+	if err != nil {
+		_ = pr.CloseWithError(err)
+		return nil, fmt.Errorf("failed to prepare encrypted payload: %w", err)
+	}
+	encryptedSize := int64(len(encryptedData))
+	log.Printf("[upload.debug] buffered mode plainSize=%d predictedEncryptedSize=%d actualEncryptedSize=%d filename=%q", input.Size, predictedEncryptedSize, encryptedSize, input.Filename)
+
+	uploadBody := bytes.NewReader(encryptedData)
+	if err := s.r2.UploadFile(ctx, storageKey, uploadBody, "application/octet-stream", encryptedSize); err != nil {
+		log.Printf("[upload.debug] r2 upload error owner=%s filename=%q encryptedSize=%d err=%v", input.OwnerID, input.Filename, encryptedSize, err)
 		pr.CloseWithError(err)
 		return nil, fmt.Errorf("upload failed: %w", err)
 	}
+	log.Printf("[upload.debug] r2 upload success owner=%s filename=%q encryptedSize=%d storageKey=%q", input.OwnerID, input.Filename, encryptedSize, storageKey)
 
 	// Tạo metadata
 	file := &models.FileMetadata{
@@ -228,6 +234,17 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+func encryptedSizeFromPlaintextSize(plainSize int64) int64 {
+	if plainSize <= 0 {
+		return int64(len(crypto.HeaderMagic) + 1 + 16 + 12)
+	}
+
+	chunkCount := (plainSize + int64(crypto.ChunkSize) - 1) / int64(crypto.ChunkSize)
+	chunkOverhead := chunkCount * (4 + 16)
+	headerSize := int64(len(crypto.HeaderMagic) + 1 + 16 + 12)
+	return headerSize + plainSize + chunkOverhead
 }
 
 // encryptionTypeToBits chuyển chuỗi "AES-128"/"AES-192"/"AES-256" thành crypto.KeyBits

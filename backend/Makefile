@@ -1,7 +1,7 @@
 .PHONY: dev build lint test test-unit test-e2e clean
 
 dev:
-	air
+	go run github.com/air-verse/air@latest -c .air.toml
 
 build:
 	go build -o server cmd/main.go
