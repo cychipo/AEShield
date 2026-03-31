@@ -1,11 +1,14 @@
 package files
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"mime"
+	"log"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/aeshield/backend/internal/crypto"
@@ -30,15 +33,38 @@ type FileRepo interface {
 	Delete(ctx context.Context, id string) error
 }
 
-type Service struct {
-	r2       R2Storage
-	fileRepo FileRepo
+type UserStorageRepo interface {
+	GetByUserID(ctx context.Context, userID string) (*models.UserStorage, error)
+	AdjustUsage(ctx context.Context, userID string, usedBytesDelta, fileCountDelta int64) error
+	SetUsageIfEmpty(ctx context.Context, userID string, usedBytes, fileCount int64) error
 }
 
-func NewService(r2 R2Storage, fileRepo FileRepo) *Service {
+var (
+	ErrFileTooLarge = errors.New("file size exceeds 1GB limit")
+	ErrStorageQuota = errors.New("storage quota exceeded")
+)
+
+type StorageUsageResponse struct {
+	UsedBytes      int64   `json:"used_bytes"`
+	QuotaBytes     int64   `json:"quota_bytes"`
+	UsedGB         float64 `json:"used_gb"`
+	QuotaGB        float64 `json:"quota_gb"`
+	PercentUsed    float64 `json:"percent_used"`
+	FileCount      int64   `json:"file_count"`
+	AvailableBytes int64   `json:"available_bytes"`
+}
+
+type Service struct {
+	r2              R2Storage
+	fileRepo        FileRepo
+	userStorageRepo UserStorageRepo
+}
+
+func NewService(r2 R2Storage, fileRepo FileRepo, userStorageRepo UserStorageRepo) *Service {
 	return &Service{
-		r2:       r2,
-		fileRepo: fileRepo,
+		r2:              r2,
+		fileRepo:        fileRepo,
+		userStorageRepo: userStorageRepo,
 	}
 }
 
@@ -55,18 +81,21 @@ type UploadInput struct {
 
 // Upload stream mã hóa file và đẩy lên R2, lưu metadata vào MongoDB.
 func (s *Service) Upload(ctx context.Context, input UploadInput) (*models.FileMetadata, error) {
+	if input.Size > models.MaxFileSizeBytes {
+		return nil, ErrFileTooLarge
+	}
+
+	usage, err := s.userStorageRepo.GetByUserID(ctx, input.OwnerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load storage usage: %w", err)
+	}
+	if usage.UsedBytes+input.Size > usage.QuotaBytes {
+		return nil, ErrStorageQuota
+	}
+
 	// Sinh unique key cho R2
 	ext := filepath.Ext(input.Filename)
 	storageKey := fmt.Sprintf("%s/%s%s", input.OwnerID, uuid.New().String(), ext)
-
-	// Detect content type nếu chưa có
-	contentType := input.ContentType
-	if contentType == "" || contentType == "application/octet-stream" {
-		contentType = mime.TypeByExtension(ext)
-		if contentType == "" {
-			contentType = "application/octet-stream"
-		}
-	}
 
 	// Map encryption type → KeyBits
 	bits, err := encryptionTypeToBits(input.EncryptionType)
@@ -81,6 +110,7 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (*models.FileMe
 
 	// Pipe: mã hóa streaming → R2 upload
 	pr, pw := io.Pipe()
+	log.Printf("[upload.debug] service start owner=%s filename=%q plainSize=%d", input.OwnerID, input.Filename, input.Size)
 
 	// Goroutine ghi ciphertext vào pipe writer
 	var encryptErr error
@@ -95,11 +125,24 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (*models.FileMe
 		_, encryptErr = crypto.Encrypt(pw, input.Body, input.Password, bits)
 	}()
 
-	// Upload từ pipe reader lên R2 (size = -1 vì ciphertext lớn hơn plaintext)
-	if err := s.r2.UploadFile(ctx, storageKey, pr, "application/octet-stream", -1); err != nil {
+	// Upload lên R2 cần Content-Length chính xác và body có thể đọc ổn định.
+	// Để tránh lỗi chữ ký với stream không seekable, buffer ciphertext trước khi PutObject.
+	predictedEncryptedSize := encryptedSizeFromPlaintextSize(input.Size)
+	encryptedData, err := io.ReadAll(pr)
+	if err != nil {
+		_ = pr.CloseWithError(err)
+		return nil, fmt.Errorf("failed to prepare encrypted payload: %w", err)
+	}
+	encryptedSize := int64(len(encryptedData))
+	log.Printf("[upload.debug] buffered mode plainSize=%d predictedEncryptedSize=%d actualEncryptedSize=%d filename=%q", input.Size, predictedEncryptedSize, encryptedSize, input.Filename)
+
+	uploadBody := bytes.NewReader(encryptedData)
+	if err := s.r2.UploadFile(ctx, storageKey, uploadBody, "application/octet-stream", encryptedSize); err != nil {
+		log.Printf("[upload.debug] r2 upload error owner=%s filename=%q encryptedSize=%d err=%v", input.OwnerID, input.Filename, encryptedSize, err)
 		pr.CloseWithError(err)
 		return nil, fmt.Errorf("upload failed: %w", err)
 	}
+	log.Printf("[upload.debug] r2 upload success owner=%s filename=%q encryptedSize=%d storageKey=%q", input.OwnerID, input.Filename, encryptedSize, storageKey)
 
 	// Tạo metadata
 	file := &models.FileMetadata{
@@ -123,6 +166,12 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (*models.FileMe
 		return nil, fmt.Errorf("failed to save metadata: %w", err)
 	}
 
+	if err := s.userStorageRepo.AdjustUsage(ctx, input.OwnerID, input.Size, 1); err != nil {
+		_ = s.r2.DeleteFile(ctx, storageKey)
+		_ = s.fileRepo.Delete(ctx, file.ID.Hex())
+		return nil, fmt.Errorf("failed to update storage usage: %w", err)
+	}
+
 	return file, nil
 }
 
@@ -130,6 +179,7 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (*models.FileMe
 type ShareInput struct {
 	FileID     string
 	OwnerID    string
+	Filename   string
 	AccessMode string   // "public" | "private" | "whitelist"
 	Whitelist  []string // dùng khi AccessMode == "whitelist"
 }
@@ -145,23 +195,32 @@ func (s *Service) Share(ctx context.Context, input ShareInput) (*models.FileMeta
 		return nil, fmt.Errorf("access denied")
 	}
 
-	switch models.AccessMode(input.AccessMode) {
+	nextAccessMode := models.AccessMode(input.AccessMode)
+	switch nextAccessMode {
 	case models.AccessModePublic, models.AccessModePrivate, models.AccessModeWhitelist:
 	default:
 		return nil, fmt.Errorf("invalid access_mode: %s", input.AccessMode)
 	}
 
-	file.AccessMode = input.AccessMode
+	nextFilename := strings.TrimSpace(input.Filename)
+	if nextFilename == "" {
+		return nil, fmt.Errorf("filename is required")
+	}
 
-	if models.AccessMode(input.AccessMode) == models.AccessModePublic && file.PublicCID == "" {
+	file.Filename = nextFilename
+	file.AccessMode = string(nextAccessMode)
+
+	if nextAccessMode == models.AccessModePublic && file.PublicCID == "" {
 		file.PublicCID = uuid.New().String()
 	}
 
-	if models.AccessMode(input.AccessMode) == models.AccessModeWhitelist {
+	if nextAccessMode == models.AccessModeWhitelist {
 		if input.Whitelist == nil {
 			input.Whitelist = []string{}
 		}
 		file.Whitelist = input.Whitelist
+	} else {
+		file.Whitelist = []string{}
 	}
 
 	if err := s.fileRepo.Update(ctx, file); err != nil {
@@ -213,12 +272,70 @@ func (s *Service) Delete(ctx context.Context, fileID, ownerID string) error {
 		return err
 	}
 
-	return s.fileRepo.Delete(ctx, fileID)
+	if err := s.fileRepo.Delete(ctx, fileID); err != nil {
+		return err
+	}
+
+	return s.userStorageRepo.AdjustUsage(ctx, ownerID, -file.Size, -1)
 }
 
 // ListFiles trả về danh sách file của owner
 func (s *Service) ListFiles(ctx context.Context, ownerID string) ([]*models.FileMetadata, error) {
 	return s.fileRepo.FindByOwner(ctx, ownerID)
+}
+
+func (s *Service) GetMyStorage(ctx context.Context, userID string) (*StorageUsageResponse, error) {
+	usage, err := s.userStorageRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if usage.UsedBytes == 0 && usage.FileCount == 0 {
+		files, err := s.fileRepo.FindByOwner(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(files) > 0 {
+			var totalBytes int64
+			for _, file := range files {
+				totalBytes += file.Size
+			}
+			totalFiles := int64(len(files))
+
+			if err := s.userStorageRepo.SetUsageIfEmpty(ctx, userID, totalBytes, totalFiles); err != nil {
+				log.Printf("[storage.debug] failed to backfill usage for user=%s: %v", userID, err)
+			}
+
+			usage.UsedBytes = totalBytes
+			usage.FileCount = totalFiles
+		}
+	}
+
+	available := usage.QuotaBytes - usage.UsedBytes
+	if available < 0 {
+		available = 0
+	}
+
+	quotaGB := float64(usage.QuotaBytes) / float64(models.BytesPerGB)
+	usedGB := float64(usage.UsedBytes) / float64(models.BytesPerGB)
+	percentUsed := 0.0
+	if usage.QuotaBytes > 0 {
+		percentUsed = (float64(usage.UsedBytes) / float64(usage.QuotaBytes)) * 100
+	}
+	if percentUsed > 100 {
+		percentUsed = 100
+	}
+
+	return &StorageUsageResponse{
+		UsedBytes:      usage.UsedBytes,
+		QuotaBytes:     usage.QuotaBytes,
+		UsedGB:         usedGB,
+		QuotaGB:        quotaGB,
+		PercentUsed:    percentUsed,
+		FileCount:      usage.FileCount,
+		AvailableBytes: available,
+	}, nil
 }
 
 func contains(slice []string, item string) bool {
@@ -228,6 +345,17 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+func encryptedSizeFromPlaintextSize(plainSize int64) int64 {
+	if plainSize <= 0 {
+		return int64(len(crypto.HeaderMagic) + 1 + 16 + 12)
+	}
+
+	chunkCount := (plainSize + int64(crypto.ChunkSize) - 1) / int64(crypto.ChunkSize)
+	chunkOverhead := chunkCount * (4 + 16)
+	headerSize := int64(len(crypto.HeaderMagic) + 1 + 16 + 12)
+	return headerSize + plainSize + chunkOverhead
 }
 
 // encryptionTypeToBits chuyển chuỗi "AES-128"/"AES-192"/"AES-256" thành crypto.KeyBits

@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"fmt"
+
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -88,7 +90,7 @@ func (h *Handler) GoogleCallback(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	return c.JSON(fiber.Map{"token": jwtToken, "user": user})
+	return c.Redirect(fmt.Sprintf("%s/auth/google/callback?token=%s", h.service.cfg.FrontendURL, jwtToken), fiber.StatusTemporaryRedirect)
 }
 
 // GitHubCallback
@@ -131,7 +133,7 @@ func (h *Handler) GitHubCallback(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	return c.JSON(fiber.Map{"token": jwtToken, "user": user})
+	return c.Redirect(fmt.Sprintf("%s/auth/github/callback?token=%s", h.service.cfg.FrontendURL, jwtToken), fiber.StatusTemporaryRedirect)
 }
 
 // GetCurrentUser

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"time"
 
 	"github.com/aeshield/backend/internal/config"
@@ -27,6 +28,7 @@ func NewR2Client(cfg *config.Config) (*R2Client, error) {
 			credentials.NewStaticCredentialsProvider(cfg.R2AccessKeyID, cfg.R2SecretAccessKey, ""),
 		),
 		awsconfig.WithRegion("auto"),
+		awsconfig.WithRequestChecksumCalculation(aws.RequestChecksumCalculationWhenRequired),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load R2 config: %w", err)
@@ -34,6 +36,7 @@ func NewR2Client(cfg *config.Config) (*R2Client, error) {
 
 	client := s3.NewFromConfig(r2Cfg, func(o *s3.Options) {
 		o.BaseEndpoint = aws.String(endpoint)
+		o.UsePathStyle = true
 	})
 
 	return &R2Client{
@@ -45,20 +48,25 @@ func NewR2Client(cfg *config.Config) (*R2Client, error) {
 
 // UploadFile upload một file stream lên R2, trả về storage path
 func (r *R2Client) UploadFile(ctx context.Context, key string, body io.Reader, contentType string, size int64) error {
-	input := &s3.PutObjectInput{
-		Bucket:      aws.String(r.bucket),
-		Key:         aws.String(key),
-		Body:        body,
-		ContentType: aws.String(contentType),
-	}
-	if size > 0 {
-		input.ContentLength = aws.Int64(size)
+	if size < 0 {
+		return fmt.Errorf("invalid content length: %d", size)
 	}
 
+	input := &s3.PutObjectInput{
+		Bucket:        aws.String(r.bucket),
+		Key:           aws.String(key),
+		Body:          body,
+		ContentType:   aws.String(contentType),
+		ContentLength: aws.Int64(size),
+	}
+
+	log.Printf("[upload.debug] r2 putobject request bucket=%q key=%q contentLength=%d contentType=%q", r.bucket, key, size, contentType)
 	_, err := r.client.PutObject(ctx, input)
 	if err != nil {
+		log.Printf("[upload.debug] r2 putobject error bucket=%q key=%q contentLength=%d err=%v", r.bucket, key, size, err)
 		return fmt.Errorf("failed to upload to R2: %w", err)
 	}
+	log.Printf("[upload.debug] r2 putobject success bucket=%q key=%q contentLength=%d", r.bucket, key, size)
 
 	return nil
 }

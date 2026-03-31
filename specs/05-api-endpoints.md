@@ -3,7 +3,7 @@
 ## Base URL
 
 ```
-Development: http://localhost:3000/api/v1
+Development: http://localhost:6888/api/v1
 Production:  https://api.aeshield.com/api/v1
 ```
 
@@ -91,6 +91,9 @@ Stream mã hóa file và lưu lên Cloudflare R2.
 }
 ```
 
+**Lỗi:**
+- `413` — file vượt quá 1 GB hoặc vượt quota 10 GB của user
+
 ---
 
 ### GET /files
@@ -123,6 +126,7 @@ Cập nhật chế độ chia sẻ hoặc whitelist của file. Chỉ owner mớ
 ```json
 {
   "file_id": "507f1f77bcf86cd799439011",
+  "filename": "renamed-document.pdf",
   "access_mode": "whitelist",
   "whitelist": ["alice@example.com", "bob@example.com"]
 }
@@ -131,7 +135,7 @@ Cập nhật chế độ chia sẻ hoặc whitelist của file. Chỉ owner mớ
 **Response `200`:** `FileMetadata` đã cập nhật
 
 **Lỗi:**
-- `400` — `file_id` thiếu hoặc `access_mode` không hợp lệ
+- `400` — `file_id`/`filename` thiếu hoặc `access_mode` không hợp lệ
 - `403` — không phải owner
 - `404` — file không tồn tại
 
@@ -143,6 +147,28 @@ Xóa file trên R2 và metadata trong MongoDB. Chỉ owner.
 **Response `200`:**
 ```json
 { "message": "deleted" }
+```
+
+---
+
+## Storage
+
+Tất cả endpoints dưới đây yêu cầu `Authorization: Bearer <token>`.
+
+### GET /storage/me
+Lấy thông tin dung lượng lưu trữ của user hiện tại.
+
+**Response `200`:**
+```json
+{
+  "used_bytes": 2147483648,
+  "quota_bytes": 10737418240,
+  "used_gb": 2.0,
+  "quota_gb": 10.0,
+  "percent_used": 20.0,
+  "file_count": 12,
+  "available_bytes": 8589934592
+}
 ```
 
 ---
@@ -159,4 +185,5 @@ Xóa file trên R2 và metadata trong MongoDB. Chỉ owner.
 | `401` | JWT thiếu hoặc không hợp lệ |
 | `403` | Không có quyền truy cập |
 | `404` | Tài nguyên không tìm thấy |
+| `413` | Payload quá lớn hoặc vượt quota |
 | `500` | Lỗi server nội bộ |

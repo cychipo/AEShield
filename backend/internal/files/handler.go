@@ -1,16 +1,28 @@
 package files
 
 import (
+	"context"
+	"log"
+
 	"github.com/aeshield/backend/internal/storage"
 	"github.com/aeshield/backend/models"
 	"github.com/gofiber/fiber/v2"
 )
 
-type Handler struct {
-	service *Service
+type FileService interface {
+	Upload(ctx context.Context, input UploadInput) (*models.FileMetadata, error)
+	GetDownloadURL(ctx context.Context, fileID, requesterID string) (string, error)
+	Delete(ctx context.Context, fileID, ownerID string) error
+	ListFiles(ctx context.Context, ownerID string) ([]*models.FileMetadata, error)
+	Share(ctx context.Context, input ShareInput) (*models.FileMetadata, error)
+	GetMyStorage(ctx context.Context, userID string) (*StorageUsageResponse, error)
 }
 
-func NewHandler(service *Service) *Handler {
+type Handler struct {
+	service FileService
+}
+
+func NewHandler(service FileService) *Handler {
 	return &Handler{service: service}
 }
 
@@ -29,6 +41,7 @@ func NewHandler(service *Service) *Handler {
 //	@Success		201				{object}	models.FileMetadata
 //	@Failure		400				{object}	map[string]string
 //	@Failure		401				{object}	map[string]string
+//	@Failure		413				{object}	map[string]string
 //	@Failure		500				{object}	map[string]string
 //	@Router			/files/upload [post]
 func (h *Handler) Upload(c *fiber.Ctx) error {
@@ -69,6 +82,8 @@ func (h *Handler) Upload(c *fiber.Ctx) error {
 	}
 	defer src.Close()
 
+	log.Printf("[upload.debug] handler receive owner=%s filename=%q size=%d contentType=%q encryption=%s access=%s", claims.UserID, fileHeader.Filename, fileHeader.Size, fileHeader.Header.Get("Content-Type"), encryptionType, accessMode)
+
 	result, err := h.service.Upload(c.Context(), UploadInput{
 		OwnerID:        claims.UserID,
 		Filename:       fileHeader.Filename,
@@ -80,6 +95,9 @@ func (h *Handler) Upload(c *fiber.Ctx) error {
 		Body:           src,
 	})
 	if err != nil {
+		if err == ErrFileTooLarge || err == ErrStorageQuota {
+			return c.Status(fiber.StatusRequestEntityTooLarge).JSON(fiber.Map{"error": err.Error()})
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -169,6 +187,31 @@ func (h *Handler) ListFiles(c *fiber.Ctx) error {
 	return c.JSON(fileList)
 }
 
+// GetMyStorage godoc
+//
+//	@Summary		Get my storage usage
+//	@Description	Lấy thông tin dung lượng đã dùng/quota của user hiện tại
+//	@Tags			storage
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Success		200	{object}	StorageUsageResponse
+//	@Failure		401	{object}	map[string]string
+//	@Failure		500	{object}	map[string]string
+//	@Router			/storage/me [get]
+func (h *Handler) GetMyStorage(c *fiber.Ctx) error {
+	claims := getUserClaims(c)
+	if claims == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	usage, err := h.service.GetMyStorage(c.Context(), claims.UserID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(usage)
+}
+
 // Share godoc
 //
 //	@Summary		Share file
@@ -195,12 +238,20 @@ func (h *Handler) Share(c *fiber.Ctx) error {
 	}
 
 	if req.FileID == "" {
+		req.FileID = c.Params("id")
+	}
+	if req.FileID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "file_id is required"})
+	}
+
+	if req.Filename == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "filename is required"})
 	}
 
 	file, err := h.service.Share(c.Context(), ShareInput{
 		FileID:     req.FileID,
 		OwnerID:    claims.UserID,
+		Filename:   req.Filename,
 		AccessMode: req.AccessMode,
 		Whitelist:  req.Whitelist,
 	})
@@ -219,6 +270,7 @@ func (h *Handler) Share(c *fiber.Ctx) error {
 
 type shareRequest struct {
 	FileID     string   `json:"file_id"`
+	Filename   string   `json:"filename"`
 	AccessMode string   `json:"access_mode"`
 	Whitelist  []string `json:"whitelist"`
 }

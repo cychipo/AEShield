@@ -50,9 +50,9 @@ cd backend
 go test ./e2e/... -v
 
 # Or set custom server URL
-TEST_SERVER_URL=http://localhost:3000 go test ./e2e/... -v
+TEST_SERVER_URL=http://localhost:6888 go test ./e2e/... -v
 
-# Default port is 6868
+# Default port is 6888
 ```
 
 ### All Tests
@@ -149,7 +149,7 @@ import (
     "github.com/stretchr/testify/require"
 )
 
-const baseURL = "http://localhost:6868"
+const baseURL = "http://localhost:6888"
 
 func TestE2E_YourEndpoint(t *testing.T) {
     resp, err := http.Get(baseURL + "/api/v1/your/endpoint")
@@ -332,7 +332,7 @@ Add to your CI pipeline:
 
 ## Notes
 
-- E2E tests use port 6868 by default (configurable via TEST_SERVER_URL)
+- E2E tests use port 6888 by default (configurable via TEST_SERVER_URL)
 - E2E tests are skipped if server is not available
 - Use `TestMain` for setup/teardown logic
 - Keep tests independent - no shared state between tests

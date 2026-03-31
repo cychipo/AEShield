@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -58,7 +57,11 @@ func main() {
 	if err := fileRepo.CreateIndexes(context.Background()); err != nil {
 		log.Printf("Warning: failed to create file indexes: %v", err)
 	}
-	fileService := files.NewService(r2Client, fileRepo)
+	userStorageRepo := storage.NewUserStorageRepository(database.GetDB().Database)
+	if err := userStorageRepo.CreateIndexes(context.Background()); err != nil {
+		log.Printf("Warning: failed to create user_storage indexes: %v", err)
+	}
+	fileService := files.NewService(r2Client, fileRepo, userStorageRepo)
 	fileHandler := files.NewHandler(fileService)
 
 	app := fiber.New(fiber.Config{
@@ -97,69 +100,8 @@ func main() {
 	app.Get("/api/v1/files/:id/download", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Download)
 	app.Delete("/api/v1/files/:id", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Delete)
 	app.Patch("/api/v1/files/share", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Share)
-
-	// OAuth callback - Google/GitHub redirect thẳng đến đây, xử lý code và trả HTML
-	app.Get("/auth/google/callback", func(c *fiber.Ctx) error {
-		code := c.Query("code")
-		html := fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Authenticating...</title>
-    <script>
-        async function completeAuth() {
-            try {
-                const response = await fetch('/api/v1/auth/google/callback?code=%s');
-                const data = await response.json();
-                if (data.token) {
-                    localStorage.setItem('aeshield_token', data.token);
-                    localStorage.setItem('aeshield_user', JSON.stringify(data.user));
-                    window.location.href = '/dashboard';
-                } else {
-                    document.body.innerHTML = '<p style="color:red;text-align:center;margin-top:50px;font-family:sans-serif;">Authentication failed: ' + (data.error || 'Unknown error') + '</p><center><a href="/">Try again</a></center>';
-                }
-            } catch (err) {
-                document.body.innerHTML = '<p style="color:red;text-align:center;margin-top:50px;font-family:sans-serif;">Error: ' + err.message + '</p><center><a href="/">Try again</a></center>';
-            }
-        }
-        completeAuth();
-    </script>
-</head>
-<body><p style="text-align:center;margin-top:50px;font-family:sans-serif;">Authenticating...</p></body>
-</html>`, code)
-		return c.Type("html").SendString(html)
-	})
-
-	app.Get("/auth/github/callback", func(c *fiber.Ctx) error {
-		code := c.Query("code")
-		html := fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Authenticating...</title>
-    <script>
-        async function completeAuth() {
-            try {
-                const response = await fetch('/api/v1/auth/github/callback?code=%s');
-                const data = await response.json();
-                if (data.token) {
-                    localStorage.setItem('aeshield_token', data.token);
-                    localStorage.setItem('aeshield_user', JSON.stringify(data.user));
-                    window.location.href = '/dashboard';
-                } else {
-                    document.body.innerHTML = '<p style="color:red;text-align:center;margin-top:50px;font-family:sans-serif;">Authentication failed: ' + (data.error || 'Unknown error') + '</p><center><a href="/">Try again</a></center>';
-                }
-            } catch (err) {
-                document.body.innerHTML = '<p style="color:red;text-align:center;margin-top:50px;font-family:sans-serif;">Error: ' + err.message + '</p><center><a href="/">Try again</a></center>';
-            }
-        }
-        completeAuth();
-    </script>
-</head>
-<body><p style="text-align:center;margin-top:50px;font-family:sans-serif;">Authenticating...</p></body>
-</html>`, code)
-		return c.Type("html").SendString(html)
-	})
+	app.Patch("/api/v1/files/:id", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Share)
+	app.Get("/api/v1/storage/me", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.GetMyStorage)
 
 	// Serve frontend static files
 	app.Static("/", frontendDist)
