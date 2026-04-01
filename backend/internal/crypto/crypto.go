@@ -10,8 +10,6 @@
 package crypto
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -89,12 +87,12 @@ func Encrypt(dst io.Writer, src io.Reader, password string, bits KeyBits) (int64
 		return 0, err
 	}
 
-	block, err := aes.NewCipher(key)
+	block, err := newAESBlock(key)
 	if err != nil {
 		return 0, fmt.Errorf("crypto: new cipher: %w", err)
 	}
 
-	gcm, err := cipher.NewGCM(block)
+	gcm, err := newGCM(block)
 	if err != nil {
 		return 0, fmt.Errorf("crypto: new GCM: %w", err)
 	}
@@ -176,12 +174,12 @@ func Decrypt(dst io.Writer, src io.Reader, password string) error {
 		return err
 	}
 
-	block, err := aes.NewCipher(key)
+	block, err := newAESBlock(key)
 	if err != nil {
 		return fmt.Errorf("crypto: new cipher: %w", err)
 	}
 
-	gcm, err := cipher.NewGCM(block)
+	gcm, err := newGCM(block)
 	if err != nil {
 		return fmt.Errorf("crypto: new GCM: %w", err)
 	}
