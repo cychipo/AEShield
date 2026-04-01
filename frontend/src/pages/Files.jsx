@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Shield,
@@ -65,7 +65,11 @@ export default function Files() {
   const [editFile, setEditFile] = useState(null);
   const [editFilename, setEditFilename] = useState("");
   const [editAccessMode, setEditAccessMode] = useState("private");
-  const [editWhitelistText, setEditWhitelistText] = useState("");
+  const [shareEmailInput, setShareEmailInput] = useState("");
+  const [shareLookupLoading, setShareLookupLoading] = useState(false);
+  const [shareResolveLoading, setShareResolveLoading] = useState(false);
+  const [shareLookupError, setShareLookupError] = useState("");
+  const [selectedWhitelistUsers, setSelectedWhitelistUsers] = useState([]);
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState("");
   const fileInputRef = useRef(null);
@@ -339,26 +343,78 @@ export default function Files() {
     setEncryptedDataCopyMessage("");
   };
 
+  const hydrateWhitelistUsers = useCallback(async (whitelistIds) => {
+    const token = localStorage.getItem("aeshield_token");
+    if (!token || !Array.isArray(whitelistIds) || whitelistIds.length === 0) {
+      return;
+    }
+
+    setShareResolveLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/users/resolve`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ids: whitelistIds }),
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = await response.json();
+      if (!Array.isArray(payload)) {
+        return;
+      }
+
+      const resolvedMap = new Map(payload.map((item) => [item.id, item]));
+      setSelectedWhitelistUsers((current) =>
+        current.map((item) => resolvedMap.get(item.id) || item)
+      );
+    } catch (error) {
+      console.error("Error resolving whitelist users:", error);
+    } finally {
+      setShareResolveLoading(false);
+    }
+  }, [navigate]);
+
   const openEditFile = (file) => {
     const rowFileId = file?.id;
     if (!rowFileId) {
       return;
     }
 
+    const initialWhitelist = Array.isArray(file?.whitelist)
+      ? file.whitelist.map((id) => ({
+          id,
+          email: "",
+          name: "",
+          avatar: "",
+        }))
+      : [];
+
     setShowEditFile(true);
     setEditFile(file);
     setEditFilename(file?.filename || "");
     setEditAccessMode(file?.access_mode || "private");
-    setEditWhitelistText(
-      Array.isArray(file?.whitelist) ? file.whitelist.join("\n") : ""
-    );
+    setShareEmailInput("");
+    setShareLookupLoading(false);
+    setShareResolveLoading(false);
+    setShareLookupError("");
+    setSelectedWhitelistUsers(initialWhitelist);
     setEditLoading(false);
     setEditError("");
     setEditingFileId(rowFileId);
+
+    if (initialWhitelist.length > 0) {
+      hydrateWhitelistUsers(initialWhitelist.map((item) => item.id));
+    }
   };
 
   const closeEditFile = () => {
-    if (editLoading) {
+    if (editLoading || shareLookupLoading || shareResolveLoading) {
       return;
     }
 
@@ -366,10 +422,94 @@ export default function Files() {
     setEditFile(null);
     setEditFilename("");
     setEditAccessMode("private");
-    setEditWhitelistText("");
+    setShareEmailInput("");
+    setShareLookupLoading(false);
+    setShareResolveLoading(false);
+    setShareLookupError("");
+    setSelectedWhitelistUsers([]);
     setEditLoading(false);
     setEditError("");
     setEditingFileId("");
+  };
+
+  const handleAddWhitelistUser = async () => {
+    const token = localStorage.getItem("aeshield_token");
+    if (!token) {
+      navigate("/", { replace: true });
+      return;
+    }
+
+    const email = shareEmailInput.trim();
+    if (!email) {
+      setShareLookupError("Vui lòng nhập email người dùng.");
+      return;
+    }
+
+    setShareLookupLoading(true);
+    setShareLookupError("");
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/users/lookup?email=${encodeURIComponent(email)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem("aeshield_token");
+          localStorage.removeItem("aeshield_user");
+          navigate("/", { replace: true });
+          return;
+        }
+
+        setShareLookupError(payload?.error || "Không tìm thấy người dùng.");
+        return;
+      }
+
+      if (!payload?.id) {
+        setShareLookupError("Không nhận được thông tin người dùng hợp lệ.");
+        return;
+      }
+
+      setSelectedWhitelistUsers((current) => {
+        if (current.some((item) => item.id === payload.id)) {
+          return current;
+        }
+        return [
+          ...current,
+          {
+            id: payload.id,
+            email: payload.email || email,
+            name: payload.name || "",
+            avatar: payload.avatar || "",
+          },
+        ];
+      });
+      setShareEmailInput("");
+    } catch (error) {
+      console.error("Error looking up user:", error);
+      setShareLookupError("Có lỗi xảy ra khi tìm người dùng theo email.");
+    } finally {
+      setShareLookupLoading(false);
+    }
+  };
+
+  const handleRemoveWhitelistUser = (userId) => {
+    setSelectedWhitelistUsers((current) =>
+      current.filter((item) => item.id !== userId)
+    );
+    setShareLookupError("");
   };
 
   const handleEditFile = async (event) => {
@@ -395,10 +535,7 @@ export default function Files() {
 
     const nextWhitelist =
       editAccessMode === "whitelist"
-        ? editWhitelistText
-            .split("\n")
-            .map((item) => item.trim())
-            .filter((item) => item.length > 0)
+        ? selectedWhitelistUsers.map((item) => item.id).filter(Boolean)
         : [];
 
     setEditLoading(true);
@@ -1262,18 +1399,87 @@ export default function Files() {
                 </div>
 
                 {editAccessMode === "whitelist" && (
-                  <div>
-                    <label className="block text-sm font-medium mb-2" htmlFor="edit-whitelist">
-                      Whitelist (mỗi dòng 1 user/email)
-                    </label>
-                    <textarea
-                      className="w-full min-h-[140px] px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-primary/20 rounded-lg text-sm"
-                      disabled={editLoading}
-                      id="edit-whitelist"
-                      onChange={(event) => setEditWhitelistText(event.target.value)}
-                      placeholder="alice@example.com&#10;bob@example.com"
-                      value={editWhitelistText}
-                    />
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium mb-2" htmlFor="share-email-input">
+                        Cấp quyền bằng email
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-primary/20 rounded-lg text-sm"
+                          disabled={editLoading || shareLookupLoading}
+                          id="share-email-input"
+                          onChange={(event) => setShareEmailInput(event.target.value)}
+                          placeholder="user@example.com"
+                          type="email"
+                          value={shareEmailInput}
+                        />
+                        <button
+                          className="px-4 py-2 rounded-lg border border-primary/20 text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                          disabled={editLoading || shareLookupLoading || shareResolveLoading}
+                          onClick={handleAddWhitelistUser}
+                          type="button"
+                        >
+                          {shareLookupLoading ? "Đang tìm..." : "Thêm quyền"}
+                        </button>
+                      </div>
+                      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                        Nhập đúng email của người dùng đã có tài khoản trong hệ thống.
+                      </p>
+                    </div>
+
+                    {shareResolveLoading && (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Đang tải thông tin whitelist hiện có...
+                      </p>
+                    )}
+
+                    {selectedWhitelistUsers.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">Người dùng được cấp quyền</p>
+                        <div className="space-y-2">
+                          {selectedWhitelistUsers.map((shareUser) => (
+                            <div
+                              className="flex items-center justify-between gap-3 rounded-lg border border-primary/10 bg-slate-50 dark:bg-slate-800 px-3 py-2"
+                              key={shareUser.id}
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div
+                                  className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 border border-primary/10 bg-cover bg-center shrink-0"
+                                  style={{
+                                    backgroundImage: shareUser.avatar
+                                      ? `url(${shareUser.avatar})`
+                                      : "none",
+                                  }}
+                                ></div>
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium truncate">
+                                    {shareUser.name || shareUser.email || shareUser.id}
+                                  </p>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                                    {shareUser.email || shareUser.id}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                className="px-3 py-1.5 rounded-lg border border-red-300 text-red-600 text-xs font-medium hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                                disabled={editLoading || shareLookupLoading}
+                                onClick={() => handleRemoveWhitelistUser(shareUser.id)}
+                                type="button"
+                              >
+                                Gỡ
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {shareLookupError && (
+                      <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 px-3 py-2 text-sm dark:bg-red-950/30 dark:border-red-800 dark:text-red-300">
+                        {shareLookupError}
+                      </div>
+                    )}
                   </div>
                 )}
 

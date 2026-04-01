@@ -93,6 +93,8 @@ func main() {
 
 	// Protected routes
 	app.Get("/api/v1/auth/me", auth.JWTMiddleware(cfg.JWTSecret), authHandler.Me)
+	app.Get("/api/v1/users/lookup", auth.JWTMiddleware(cfg.JWTSecret), authHandler.LookupUserByEmail)
+	app.Post("/api/v1/users/resolve", auth.JWTMiddleware(cfg.JWTSecret), authHandler.ResolveUsersByID)
 
 	// File routes (protected)
 	app.Post("/api/v1/files/upload", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Upload)

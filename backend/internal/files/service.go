@@ -215,10 +215,7 @@ func (s *Service) Share(ctx context.Context, input ShareInput) (*models.FileMeta
 	}
 
 	if nextAccessMode == models.AccessModeWhitelist {
-		if input.Whitelist == nil {
-			input.Whitelist = []string{}
-		}
-		file.Whitelist = input.Whitelist
+		file.Whitelist = normalizeWhitelist(input.Whitelist, input.OwnerID)
 	} else {
 		file.Whitelist = []string{}
 	}
@@ -345,6 +342,27 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+func normalizeWhitelist(items []string, ownerID string) []string {
+	if len(items) == 0 {
+		return []string{}
+	}
+
+	seen := make(map[string]struct{}, len(items))
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		normalized := strings.TrimSpace(item)
+		if normalized == "" || normalized == ownerID {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+	}
+	return result
 }
 
 func encryptedSizeFromPlaintextSize(plainSize int64) int64 {

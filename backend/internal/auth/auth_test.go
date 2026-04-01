@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +28,15 @@ func NewMockUserRepository() *MockUserRepository {
 	return &MockUserRepository{
 		users: make(map[string]*models.User),
 	}
+}
+
+func (m *MockUserRepository) FindByID(ctx context.Context, id string) (*models.User, error) {
+	for _, user := range m.users {
+		if user.ID.Hex() == id {
+			return user, nil
+		}
+	}
+	return nil, database.ErrUserNotFound
 }
 
 func (m *MockUserRepository) FindByProvider(ctx context.Context, provider, providerID string) (*models.User, error) {
@@ -213,6 +223,121 @@ func TestMe_ValidToken(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, fiber.StatusOK, resp.StatusCode)
+}
+
+func TestLookupUserByEmail_ValidToken(t *testing.T) {
+	cfg := config.Load()
+	cfg.JWTSecret = "test-secret"
+	mockRepo := NewMockUserRepository()
+	mockRepo.users["friend@example.com"] = &models.User{
+		ID:     primitive.NewObjectID(),
+		Email:  "friend@example.com",
+		Name:   "Friend User",
+		Avatar: "https://example.com/avatar.png",
+	}
+	service := NewService(cfg, mockRepo)
+	handler := NewHandler(service)
+
+	app := fiber.New()
+	api := app.Group("/api/v1")
+	api.Get("/users/lookup", JWTMiddleware(cfg.JWTSecret), handler.LookupUserByEmail)
+
+	claims := &models.Claims{UserID: "owner-1", Email: "owner@example.com"}
+	tokenString, err := service.GenerateJWT(claims)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/api/v1/users/lookup?email=friend@example.com", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenString)
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, fiber.StatusOK, resp.StatusCode)
+
+	var result UserLookupResult
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Equal(t, "friend@example.com", result.Email)
+	assert.Equal(t, "Friend User", result.Name)
+	assert.NotEmpty(t, result.ID)
+}
+
+func TestLookupUserByEmail_NotFound(t *testing.T) {
+	cfg := config.Load()
+	cfg.JWTSecret = "test-secret"
+	mockRepo := NewMockUserRepository()
+	service := NewService(cfg, mockRepo)
+	handler := NewHandler(service)
+
+	app := fiber.New()
+	api := app.Group("/api/v1")
+	api.Get("/users/lookup", JWTMiddleware(cfg.JWTSecret), handler.LookupUserByEmail)
+
+	claims := &models.Claims{UserID: "owner-1", Email: "owner@example.com"}
+	tokenString, err := service.GenerateJWT(claims)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/api/v1/users/lookup?email=missing@example.com", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenString)
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, fiber.StatusNotFound, resp.StatusCode)
+}
+
+func TestLookupUserByEmail_RequireEmail(t *testing.T) {
+	cfg := config.Load()
+	cfg.JWTSecret = "test-secret"
+	mockRepo := NewMockUserRepository()
+	service := NewService(cfg, mockRepo)
+	handler := NewHandler(service)
+
+	app := fiber.New()
+	api := app.Group("/api/v1")
+	api.Get("/users/lookup", JWTMiddleware(cfg.JWTSecret), handler.LookupUserByEmail)
+
+	claims := &models.Claims{UserID: "owner-1", Email: "owner@example.com"}
+	tokenString, err := service.GenerateJWT(claims)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/api/v1/users/lookup", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenString)
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, fiber.StatusBadRequest, resp.StatusCode)
+}
+
+func TestResolveUsersByID_ValidToken(t *testing.T) {
+	cfg := config.Load()
+	cfg.JWTSecret = "test-secret"
+	mockRepo := NewMockUserRepository()
+	user := &models.User{
+		ID:     primitive.NewObjectID(),
+		Email:  "friend@example.com",
+		Name:   "Friend User",
+		Avatar: "https://example.com/avatar.png",
+	}
+	mockRepo.users[user.Email] = user
+	service := NewService(cfg, mockRepo)
+	handler := NewHandler(service)
+
+	app := fiber.New()
+	api := app.Group("/api/v1")
+	api.Post("/users/resolve", JWTMiddleware(cfg.JWTSecret), handler.ResolveUsersByID)
+
+	claims := &models.Claims{UserID: "owner-1", Email: "owner@example.com"}
+	tokenString, err := service.GenerateJWT(claims)
+	require.NoError(t, err)
+
+	body := strings.NewReader(`{"ids":["` + user.ID.Hex() + `","missing-id"]}`)
+	req := httptest.NewRequest("POST", "/api/v1/users/resolve", body)
+	req.Header.Set("Authorization", "Bearer "+tokenString)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, fiber.StatusOK, resp.StatusCode)
+
+	var result []UserLookupResult
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	require.Len(t, result, 1)
+	assert.Equal(t, user.ID.Hex(), result[0].ID)
+	assert.Equal(t, user.Email, result[0].Email)
 }
 
 func TestFindOrCreateUser_CreateNew(t *testing.T) {

@@ -977,12 +977,12 @@ func TestShare_OwnerCanSetWhitelist(t *testing.T) {
 		OwnerID:    "owner-1",
 		Filename:   "whitelist-file.txt",
 		AccessMode: "whitelist",
-		Whitelist:  []string{"alice@test.com", "bob@test.com"},
+		Whitelist:  []string{" user-2 ", "user-3", "user-2", "", "owner-1"},
 	})
 
 	require.NoError(t, err)
 	assert.Equal(t, "whitelist", updated.AccessMode)
-	assert.ElementsMatch(t, []string{"alice@test.com", "bob@test.com"}, updated.Whitelist)
+	assert.ElementsMatch(t, []string{"user-2", "user-3"}, updated.Whitelist)
 }
 
 func TestShare_NonOwnerDenied(t *testing.T) {

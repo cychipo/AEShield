@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 
+	"github.com/aeshield/backend/internal/database"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -149,6 +151,35 @@ func (h *Handler) GitHubCallback(c *fiber.Ctx) error {
 func (h *Handler) Me(c *fiber.Ctx) error {
 	user := c.Locals("user")
 	return c.JSON(user)
+}
+
+func (h *Handler) LookupUserByEmail(c *fiber.Ctx) error {
+	result, err := h.service.LookupUserByEmail(c.Context(), c.Query("email"))
+	if err != nil {
+		if err.Error() == "email is required" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		}
+		if errors.Is(err, database.ErrUserNotFound) {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(result)
+}
+
+func (h *Handler) ResolveUsersByID(c *fiber.Ctx) error {
+	var req UserResolveRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+
+	result, err := h.service.ResolveUsersByID(c.Context(), req.IDs)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(result)
 }
 
 type Handler struct {

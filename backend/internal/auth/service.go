@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aeshield/backend/internal/config"
@@ -19,10 +20,22 @@ import (
 )
 
 type UserRepository interface {
+	FindByID(ctx context.Context, id string) (*models.User, error)
 	FindByProvider(ctx context.Context, provider, providerID string) (*models.User, error)
 	FindByEmail(ctx context.Context, email string) (*models.User, error)
 	Create(ctx context.Context, user *models.User) error
 	Update(ctx context.Context, user *models.User) error
+}
+
+type UserLookupResult struct {
+	ID     string `json:"id"`
+	Email  string `json:"email"`
+	Name   string `json:"name"`
+	Avatar string `json:"avatar"`
+}
+
+type UserResolveRequest struct {
+	IDs []string `json:"ids"`
 }
 
 type GoogleUser struct {
@@ -152,6 +165,61 @@ func (s *Service) getGitHubPrimaryEmail(token *oauth2.Token) (string, error) {
 	}
 
 	return "", errors.New("no primary email found")
+}
+
+func (s *Service) LookupUserByEmail(ctx context.Context, email string) (*UserLookupResult, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return nil, errors.New("email is required")
+	}
+
+	user, err := s.userRepo.FindByEmail(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+
+	return &UserLookupResult{
+		ID:     user.ID.Hex(),
+		Email:  user.Email,
+		Name:   user.Name,
+		Avatar: user.Avatar,
+	}, nil
+}
+
+func (s *Service) ResolveUsersByID(ctx context.Context, ids []string) ([]UserLookupResult, error) {
+	if len(ids) == 0 {
+		return []UserLookupResult{}, nil
+	}
+
+	results := make([]UserLookupResult, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		normalized := strings.TrimSpace(id)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+
+		user, err := s.userRepo.FindByID(ctx, normalized)
+		if err != nil {
+			if errors.Is(err, database.ErrUserNotFound) {
+				continue
+			}
+			return nil, err
+		}
+
+		results = append(results, UserLookupResult{
+			ID:     user.ID.Hex(),
+			Email:  user.Email,
+			Name:   user.Name,
+			Avatar: user.Avatar,
+		})
+	}
+
+	return results, nil
 }
 
 func (s *Service) FindOrCreateUser(ctx context.Context, provider, providerID, email, name, avatar string) (*models.User, error) {
