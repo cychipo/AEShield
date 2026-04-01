@@ -73,6 +73,27 @@ func (r *FileRepository) FindByOwner(ctx context.Context, ownerID string) ([]*mo
 	return files, nil
 }
 
+func (r *FileRepository) FindSharedWithUser(ctx context.Context, userID string) ([]*models.FileMetadata, error) {
+	cursor, err := r.collection.Find(ctx,
+		bson.M{
+			"access_mode": models.AccessModeWhitelist,
+			"whitelist":   userID,
+		},
+		options.Find().SetSort(bson.M{"created_at": -1}),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var files []*models.FileMetadata
+	if err := cursor.All(ctx, &files); err != nil {
+		return nil, err
+	}
+
+	return files, nil
+}
+
 func (r *FileRepository) FindByPublicCID(ctx context.Context, cid string) (*models.FileMetadata, error) {
 	var file models.FileMetadata
 	err := r.collection.FindOne(ctx, bson.M{"public_cid": cid}).Decode(&file)
@@ -122,6 +143,10 @@ func (r *FileRepository) CreateIndexes(ctx context.Context) error {
 		{
 			Keys:    bson.D{{Key: "public_cid", Value: 1}},
 			Options: options.Index().SetUnique(true).SetSparse(true),
+		},
+		{
+			Keys:    bson.D{{Key: "access_mode", Value: 1}, {Key: "whitelist", Value: 1}, {Key: "created_at", Value: -1}},
+			Options: options.Index(),
 		},
 	}
 

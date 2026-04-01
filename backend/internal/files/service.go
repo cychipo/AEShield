@@ -29,6 +29,7 @@ type FileRepo interface {
 	Create(ctx context.Context, file *models.FileMetadata) error
 	FindByID(ctx context.Context, id string) (*models.FileMetadata, error)
 	FindByOwner(ctx context.Context, ownerID string) ([]*models.FileMetadata, error)
+	FindSharedWithUser(ctx context.Context, userID string) ([]*models.FileMetadata, error)
 	Update(ctx context.Context, file *models.FileMetadata) error
 	Delete(ctx context.Context, id string) error
 }
@@ -54,17 +55,28 @@ type StorageUsageResponse struct {
 	AvailableBytes int64   `json:"available_bytes"`
 }
 
-type Service struct {
-	r2              R2Storage
-	fileRepo        FileRepo
-	userStorageRepo UserStorageRepo
+type FileListResponse struct {
+	OwnedFiles   []*models.FileMetadata `json:"owned_files"`
+	SharedWithMe []*models.FileMetadata `json:"shared_with_me"`
 }
 
-func NewService(r2 R2Storage, fileRepo FileRepo, userStorageRepo UserStorageRepo) *Service {
+type NotificationRepo interface {
+	CreateMany(ctx context.Context, notifications []*models.Notification) error
+}
+
+type Service struct {
+	r2               R2Storage
+	fileRepo         FileRepo
+	userStorageRepo  UserStorageRepo
+	notificationRepo NotificationRepo
+}
+
+func NewService(r2 R2Storage, fileRepo FileRepo, userStorageRepo UserStorageRepo, notificationRepo NotificationRepo) *Service {
 	return &Service{
-		r2:              r2,
-		fileRepo:        fileRepo,
-		userStorageRepo: userStorageRepo,
+		r2:               r2,
+		fileRepo:         fileRepo,
+		userStorageRepo:  userStorageRepo,
+		notificationRepo: notificationRepo,
 	}
 }
 
@@ -177,11 +189,14 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (*models.FileMe
 
 // ShareInput là input để cập nhật access mode hoặc whitelist của file
 type ShareInput struct {
-	FileID     string
-	OwnerID    string
-	Filename   string
-	AccessMode string   // "public" | "private" | "whitelist"
-	Whitelist  []string // dùng khi AccessMode == "whitelist"
+	FileID      string
+	OwnerID     string
+	OwnerName   string
+	OwnerEmail  string
+	OwnerAvatar string
+	Filename    string
+	AccessMode  string   // "public" | "private" | "whitelist"
+	Whitelist   []string // dùng khi AccessMode == "whitelist"
 }
 
 // Share cập nhật chế độ chia sẻ / whitelist của file (chỉ owner mới được phép)
@@ -207,6 +222,8 @@ func (s *Service) Share(ctx context.Context, input ShareInput) (*models.FileMeta
 		return nil, fmt.Errorf("filename is required")
 	}
 
+	oldWhitelist := append([]string(nil), file.Whitelist...)
+
 	file.Filename = nextFilename
 	file.AccessMode = string(nextAccessMode)
 
@@ -222,6 +239,28 @@ func (s *Service) Share(ctx context.Context, input ShareInput) (*models.FileMeta
 
 	if err := s.fileRepo.Update(ctx, file); err != nil {
 		return nil, fmt.Errorf("failed to update file: %w", err)
+	}
+
+	if s.notificationRepo != nil && nextAccessMode == models.AccessModeWhitelist {
+		newlyAddedRecipients := diffWhitelist(oldWhitelist, file.Whitelist)
+		if len(newlyAddedRecipients) > 0 {
+			notifications := make([]*models.Notification, 0, len(newlyAddedRecipients))
+			for _, recipientUserID := range newlyAddedRecipients {
+				notifications = append(notifications, &models.Notification{
+					RecipientUserID:      recipientUserID,
+					ActorUserID:          input.OwnerID,
+					Type:                 models.NotificationTypeFileAddedToWhitelist,
+					FileID:               file.ID.Hex(),
+					FileFilenameSnapshot: file.Filename,
+					ActorNameSnapshot:    strings.TrimSpace(input.OwnerName),
+					ActorEmailSnapshot:   strings.TrimSpace(input.OwnerEmail),
+					ActorAvatarSnapshot:  strings.TrimSpace(input.OwnerAvatar),
+				})
+			}
+			if err := s.notificationRepo.CreateMany(ctx, notifications); err != nil {
+				log.Printf("[notifications.warn] failed to create notifications for file=%s err=%v", file.ID.Hex(), err)
+			}
+		}
 	}
 
 	return file, nil
@@ -276,9 +315,22 @@ func (s *Service) Delete(ctx context.Context, fileID, ownerID string) error {
 	return s.userStorageRepo.AdjustUsage(ctx, ownerID, -file.Size, -1)
 }
 
-// ListFiles trả về danh sách file của owner
-func (s *Service) ListFiles(ctx context.Context, ownerID string) ([]*models.FileMetadata, error) {
-	return s.fileRepo.FindByOwner(ctx, ownerID)
+// ListFiles trả về danh sách file của owner và các file được chia sẻ cho user hiện tại.
+func (s *Service) ListFiles(ctx context.Context, userID string) (*FileListResponse, error) {
+	ownedFiles, err := s.fileRepo.FindByOwner(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	sharedFiles, err := s.fileRepo.FindSharedWithUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &FileListResponse{
+		OwnedFiles:   ownedFiles,
+		SharedWithMe: sharedFiles,
+	}, nil
 }
 
 func (s *Service) GetMyStorage(ctx context.Context, userID string) (*StorageUsageResponse, error) {
@@ -361,6 +413,26 @@ func normalizeWhitelist(items []string, ownerID string) []string {
 		}
 		seen[normalized] = struct{}{}
 		result = append(result, normalized)
+	}
+	return result
+}
+
+func diffWhitelist(previous, current []string) []string {
+	if len(current) == 0 {
+		return []string{}
+	}
+
+	seen := make(map[string]struct{}, len(previous))
+	for _, item := range previous {
+		seen[item] = struct{}{}
+	}
+
+	result := make([]string, 0, len(current))
+	for _, item := range current {
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		result = append(result, item)
 	}
 	return result
 }

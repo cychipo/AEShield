@@ -2,9 +2,9 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Files from './pages/Files';
-import Whitelist from './pages/Whitelist';
 import Settings from './pages/Settings';
 import AuthCallback from './pages/AuthCallback';
+import { NotificationsProvider } from './context/NotificationsContext';
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem('aeshield_token');
@@ -13,7 +13,7 @@ function ProtectedRoute({ children }) {
     return <Navigate to="/" replace />;
   }
 
-  return children;
+  return <NotificationsProvider>{children}</NotificationsProvider>;
 }
 
 function App() {
@@ -34,14 +34,6 @@ function App() {
           element={
             <ProtectedRoute>
               <Files />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/whitelist"
-          element={
-            <ProtectedRoute>
-              <Whitelist />
             </ProtectedRoute>
           }
         />

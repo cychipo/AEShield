@@ -43,6 +43,24 @@ func (FileMetadata) CollectionName() string {
 	return "files"
 }
 
+type Notification struct {
+	ID                    primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	RecipientUserID       string             `bson:"recipient_user_id" json:"recipient_user_id"`
+	ActorUserID           string             `bson:"actor_user_id" json:"actor_user_id"`
+	Type                  string             `bson:"type" json:"type"`
+	FileID                string             `bson:"file_id" json:"file_id"`
+	FileFilenameSnapshot  string             `bson:"file_filename_snapshot" json:"file_filename_snapshot"`
+	ActorNameSnapshot     string             `bson:"actor_name_snapshot" json:"actor_name_snapshot"`
+	ActorEmailSnapshot    string             `bson:"actor_email_snapshot" json:"actor_email_snapshot"`
+	ActorAvatarSnapshot   string             `bson:"actor_avatar_snapshot" json:"actor_avatar_snapshot"`
+	ReadAt                *time.Time         `bson:"read_at,omitempty" json:"read_at,omitempty"`
+	CreatedAt             time.Time          `bson:"created_at" json:"created_at"`
+}
+
+func (Notification) CollectionName() string {
+	return "notifications"
+}
+
 type EncryptionType string
 
 const (
@@ -58,6 +76,8 @@ const (
 	AccessModePrivate   AccessMode = "private"
 	AccessModeWhitelist AccessMode = "whitelist"
 )
+
+const NotificationTypeFileAddedToWhitelist = "file_added_to_whitelist"
 
 const (
 	BytesPerGB            int64 = 1024 * 1024 * 1024

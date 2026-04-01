@@ -83,12 +83,21 @@ type mockUserStorageRepo struct {
 	}
 }
 
+type mockNotificationRepo struct {
+	notifications []*models.Notification
+	createErr     error
+}
+
 func newMockFileRepo() *mockFileRepo {
 	return &mockFileRepo{files: make(map[string]*models.FileMetadata)}
 }
 
 func newMockUserStorageRepo() *mockUserStorageRepo {
 	return &mockUserStorageRepo{storage: make(map[string]*models.UserStorage)}
+}
+
+func newMockNotificationRepo() *mockNotificationRepo {
+	return &mockNotificationRepo{}
 }
 
 func (m *mockFileRepo) Create(_ context.Context, file *models.FileMetadata) error {
@@ -116,6 +125,22 @@ func (m *mockFileRepo) FindByOwner(_ context.Context, ownerID string) ([]*models
 	for _, f := range m.files {
 		if f.OwnerID == ownerID {
 			result = append(result, f)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockFileRepo) FindSharedWithUser(_ context.Context, userID string) ([]*models.FileMetadata, error) {
+	var result []*models.FileMetadata
+	for _, f := range m.files {
+		if f.AccessMode != string(models.AccessModeWhitelist) {
+			continue
+		}
+		for _, allowedUserID := range f.Whitelist {
+			if allowedUserID == userID {
+				result = append(result, f)
+				break
+			}
 		}
 	}
 	return result, nil
@@ -198,6 +223,14 @@ func (m *mockUserStorageRepo) SetUsageIfEmpty(_ context.Context, userID string, 
 	return nil
 }
 
+func (m *mockNotificationRepo) CreateMany(_ context.Context, notifications []*models.Notification) error {
+	if m.createErr != nil {
+		return m.createErr
+	}
+	m.notifications = append(m.notifications, notifications...)
+	return nil
+}
+
 type mockHandlerService struct {
 	uploadErr  error
 	storage    *StorageUsageResponse
@@ -219,8 +252,8 @@ func (m *mockHandlerService) Delete(_ context.Context, _ string, _ string) error
 	return nil
 }
 
-func (m *mockHandlerService) ListFiles(_ context.Context, _ string) ([]*models.FileMetadata, error) {
-	return []*models.FileMetadata{}, nil
+func (m *mockHandlerService) ListFiles(_ context.Context, _ string) (*FileListResponse, error) {
+	return &FileListResponse{}, nil
 }
 
 func (m *mockHandlerService) Share(_ context.Context, _ ShareInput) (*models.FileMetadata, error) {
@@ -242,7 +275,7 @@ func (m *mockHandlerService) GetMyStorage(_ context.Context, _ string) (*Storage
 // ---------------------------------------------------------------------------
 
 func newTestService(r2 *mockR2, repo *mockFileRepo, userStorageRepo *mockUserStorageRepo) *Service {
-	return NewService(r2, repo, userStorageRepo)
+	return NewService(r2, repo, userStorageRepo, newMockNotificationRepo())
 }
 
 func seedFile(repo *mockFileRepo, ownerID, accessMode string, whitelist []string) *models.FileMetadata {
@@ -670,21 +703,24 @@ func TestDelete_FileNotFound(t *testing.T) {
 // Service tests — ListFiles
 // ---------------------------------------------------------------------------
 
-func TestListFiles_ReturnsOnlyOwnerFiles(t *testing.T) {
+func TestListFiles_ReturnsOwnedAndSharedFiles(t *testing.T) {
 	r2 := &mockR2{}
 	repo := newMockFileRepo()
-	seedFile(repo, "user-A", "private", nil)
-	seedFile(repo, "user-A", "public", nil)
+	ownedPrivate := seedFile(repo, "user-A", "private", nil)
+	ownedPublic := seedFile(repo, "user-A", "public", nil)
+	shared := seedFile(repo, "user-B", "whitelist", []string{"user-A", "user-C"})
 	seedFile(repo, "user-B", "private", nil)
+	seedFile(repo, "user-C", "whitelist", []string{"user-Z"})
 	svc := newTestService(r2, repo, newMockUserStorageRepo())
 
-	files, err := svc.ListFiles(context.Background(), "user-A")
+	result, err := svc.ListFiles(context.Background(), "user-A")
 
 	require.NoError(t, err)
-	assert.Len(t, files, 2)
-	for _, f := range files {
-		assert.Equal(t, "user-A", f.OwnerID)
-	}
+	require.NotNil(t, result)
+	assert.Len(t, result.OwnedFiles, 2)
+	assert.Len(t, result.SharedWithMe, 1)
+	assert.ElementsMatch(t, []string{ownedPrivate.ID.Hex(), ownedPublic.ID.Hex()}, []string{result.OwnedFiles[0].ID.Hex(), result.OwnedFiles[1].ID.Hex()})
+	assert.Equal(t, shared.ID.Hex(), result.SharedWithMe[0].ID.Hex())
 }
 
 func TestListFiles_Empty(t *testing.T) {
@@ -692,10 +728,12 @@ func TestListFiles_Empty(t *testing.T) {
 	repo := newMockFileRepo()
 	svc := newTestService(r2, repo, newMockUserStorageRepo())
 
-	files, err := svc.ListFiles(context.Background(), "user-nobody")
+	result, err := svc.ListFiles(context.Background(), "user-nobody")
 
 	require.NoError(t, err)
-	assert.Empty(t, files)
+	require.NotNil(t, result)
+	assert.Empty(t, result.OwnedFiles)
+	assert.Empty(t, result.SharedWithMe)
 }
 
 // ---------------------------------------------------------------------------
@@ -850,6 +888,7 @@ func TestHandler_ListFiles_Success(t *testing.T) {
 	repo := newMockFileRepo()
 	seedFile(repo, "user-1", "private", nil)
 	seedFile(repo, "user-1", "public", nil)
+	shared := seedFile(repo, "user-2", "whitelist", []string{"user-1"})
 	app := setupHandlerApp(r2, repo, newMockUserStorageRepo(), "user-1")
 
 	req := httptest.NewRequest("GET", "/files", nil)
@@ -858,9 +897,12 @@ func TestHandler_ListFiles_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, fiber.StatusOK, resp.StatusCode)
 
-	var result []models.FileMetadata
-	json.NewDecoder(resp.Body).Decode(&result)
-	assert.Len(t, result, 2)
+	var result FileListResponse
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+	assert.Len(t, result.OwnedFiles, 2)
+	assert.Len(t, result.SharedWithMe, 1)
+	assert.Equal(t, shared.ID.Hex(), result.SharedWithMe[0].ID.Hex())
 }
 
 func TestHandler_Download_Success(t *testing.T) {
@@ -1071,6 +1113,50 @@ func TestShare_PrivateClearsWhitelist(t *testing.T) {
 	assert.Equal(t, "private-file.txt", updated.Filename)
 }
 
+func TestShare_CreatesNotificationsForNewWhitelistUsers(t *testing.T) {
+	r2 := &mockR2{}
+	repo := newMockFileRepo()
+	notificationRepo := newMockNotificationRepo()
+	f := seedFile(repo, "owner-1", "whitelist", []string{"user-2"})
+	svc := NewService(r2, repo, newMockUserStorageRepo(), notificationRepo)
+
+	updated, err := svc.Share(context.Background(), ShareInput{
+		FileID:     f.ID.Hex(),
+		OwnerID:    "owner-1",
+		Filename:   "shared.txt",
+		AccessMode: "whitelist",
+		Whitelist:  []string{"user-2", "user-3", "user-4", "user-4"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"user-2", "user-3", "user-4"}, updated.Whitelist)
+	require.Len(t, notificationRepo.notifications, 2)
+	assert.Equal(t, "user-3", notificationRepo.notifications[0].RecipientUserID)
+	assert.Equal(t, "user-4", notificationRepo.notifications[1].RecipientUserID)
+	assert.Equal(t, models.NotificationTypeFileAddedToWhitelist, notificationRepo.notifications[0].Type)
+	assert.Equal(t, f.ID.Hex(), notificationRepo.notifications[0].FileID)
+	assert.Equal(t, "shared.txt", notificationRepo.notifications[0].FileFilenameSnapshot)
+}
+
+func TestShare_DoesNotCreateNotificationsWhenWhitelistUnchanged(t *testing.T) {
+	r2 := &mockR2{}
+	repo := newMockFileRepo()
+	notificationRepo := newMockNotificationRepo()
+	f := seedFile(repo, "owner-1", "whitelist", []string{"user-2", "user-3"})
+	svc := NewService(r2, repo, newMockUserStorageRepo(), notificationRepo)
+
+	_, err := svc.Share(context.Background(), ShareInput{
+		FileID:     f.ID.Hex(),
+		OwnerID:    "owner-1",
+		Filename:   "same-users.txt",
+		AccessMode: "whitelist",
+		Whitelist:  []string{"user-3", "user-2"},
+	})
+
+	require.NoError(t, err)
+	assert.Empty(t, notificationRepo.notifications)
+}
+
 // Handler tests — Share
 func TestHandler_Share_Success(t *testing.T) {
 	r2 := &mockR2{}
@@ -1134,6 +1220,7 @@ func TestHandler_Share_ByPathID_Success(t *testing.T) {
 var _ R2Storage = (*mockR2)(nil)
 var _ FileRepo = (*mockFileRepo)(nil)
 var _ UserStorageRepo = (*mockUserStorageRepo)(nil)
+var _ NotificationRepo = (*mockNotificationRepo)(nil)
 var _ FileService = (*mockHandlerService)(nil)
 
 // Unused import guard

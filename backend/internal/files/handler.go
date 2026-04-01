@@ -13,7 +13,7 @@ type FileService interface {
 	Upload(ctx context.Context, input UploadInput) (*models.FileMetadata, error)
 	GetDownloadURL(ctx context.Context, fileID, requesterID string) (string, error)
 	Delete(ctx context.Context, fileID, ownerID string) error
-	ListFiles(ctx context.Context, ownerID string) ([]*models.FileMetadata, error)
+	ListFiles(ctx context.Context, ownerID string) (*FileListResponse, error)
 	Share(ctx context.Context, input ShareInput) (*models.FileMetadata, error)
 	GetMyStorage(ctx context.Context, userID string) (*StorageUsageResponse, error)
 }
@@ -249,11 +249,14 @@ func (h *Handler) Share(c *fiber.Ctx) error {
 	}
 
 	file, err := h.service.Share(c.Context(), ShareInput{
-		FileID:     req.FileID,
-		OwnerID:    claims.UserID,
-		Filename:   req.Filename,
-		AccessMode: req.AccessMode,
-		Whitelist:  req.Whitelist,
+		FileID:      req.FileID,
+		OwnerID:     claims.UserID,
+		OwnerName:   claims.Name,
+		OwnerEmail:  claims.Email,
+		OwnerAvatar: claims.Avatar,
+		Filename:    req.Filename,
+		AccessMode:  req.AccessMode,
+		Whitelist:   req.Whitelist,
 	})
 	if err != nil {
 		if err == storage.ErrFileNotFound {

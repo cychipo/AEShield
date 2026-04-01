@@ -4,11 +4,9 @@ import {
   Shield,
   LayoutDashboard,
   FolderOpen,
-  UserCheck,
   Settings as SettingsIcon,
-  Search,
-  Bell,
 } from "lucide-react";
+import AppHeader from "../components/AppHeader";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL || "http://localhost:6888/api/v1";
@@ -99,13 +97,6 @@ export default function Settings() {
             <span>Tệp tin</span>
           </a>
           <a
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-            href="/whitelist"
-          >
-            <UserCheck size={20} />
-            <span>Danh sách tin cậy</span>
-          </a>
-          <a
             className="flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary font-medium"
             href="/settings"
           >
@@ -133,45 +124,7 @@ export default function Settings() {
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <header className="h-16 border-b border-primary/10 bg-white dark:bg-slate-900 flex items-center justify-between px-8">
-          <div className="flex items-center gap-4 flex-1 max-w-xl">
-            <div className="relative w-full">
-              <Search
-                size={18}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-              />
-              <input
-                className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border-none rounded-lg focus:ring-1 focus:ring-primary text-sm"
-                placeholder="Tìm kiếm cài đặt..."
-                type="text"
-              />
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <button className="p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg relative">
-              <Bell size={20} />
-              <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white dark:border-slate-900"></span>
-            </button>
-            <div className="h-8 w-px bg-primary/10 mx-2"></div>
-            <div className="flex items-center gap-3">
-              <div className="text-right hidden sm:block">
-                <p className="text-sm font-semibold leading-none">
-                  {user?.name || "User"}
-                </p>
-                <p className="text-xs text-slate-500">{user?.email || ""}</p>
-              </div>
-              <div
-                className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 border-2 border-primary/20 bg-cover bg-center"
-                style={{
-                  backgroundImage: user?.avatar
-                    ? `url(${user.avatar})`
-                    : "none",
-                }}
-              ></div>
-            </div>
-          </div>
-        </header>
+        <AppHeader user={user} searchPlaceholder="Tìm kiếm cài đặt..." />
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-8">

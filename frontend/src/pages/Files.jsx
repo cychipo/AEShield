@@ -4,10 +4,7 @@ import {
   Shield,
   LayoutDashboard,
   FolderOpen,
-  UserCheck,
   Settings,
-  Search,
-  Bell,
   CloudUpload,
   Download,
   Eye,
@@ -15,6 +12,7 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
+import AppHeader from "../components/AppHeader";
 import {
   decryptEncryptedFile,
   detectPreviewType,
@@ -36,7 +34,8 @@ export default function Files() {
   const [uploadError, setUploadError] = useState("");
   const [uploadSuccess, setUploadSuccess] = useState("");
   const [lastUploadedFile, setLastUploadedFile] = useState(null);
-  const [files, setFiles] = useState([]);
+  const [ownedFiles, setOwnedFiles] = useState([]);
+  const [sharedFiles, setSharedFiles] = useState([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState("");
   const [downloadingFileId, setDownloadingFileId] = useState("");
@@ -155,7 +154,8 @@ export default function Files() {
       }
 
       const filesPayload = await response.json();
-      setFiles(Array.isArray(filesPayload) ? filesPayload : []);
+      setOwnedFiles(Array.isArray(filesPayload?.owned_files) ? filesPayload.owned_files : []);
+      setSharedFiles(Array.isArray(filesPayload?.shared_with_me) ? filesPayload.shared_with_me : []);
     } catch (error) {
       console.error("Error fetching files:", error);
       setFilesError("Có lỗi xảy ra khi tải danh sách tệp tin.");
@@ -258,7 +258,7 @@ export default function Files() {
         return;
       }
 
-      setFiles((prevFiles) => prevFiles.filter((file) => file.id !== fileId));
+      setOwnedFiles((prevFiles) => prevFiles.filter((file) => file.id !== fileId));
       await fetchFiles(token);
     } catch (error) {
       console.error("Error deleting file:", error);
@@ -574,7 +574,7 @@ export default function Files() {
         return;
       }
 
-      setFiles((prevFiles) =>
+      setOwnedFiles((prevFiles) =>
         prevFiles.map((file) => (file.id === fileId ? payload : file))
       );
 
@@ -914,6 +914,185 @@ export default function Files() {
     }
   };
 
+  const renderFileTable = (fileList, options = {}) => {
+    const {
+      allowManage = false,
+      emptyTitle,
+      emptyDescription,
+      showSharedBadge = false,
+    } = options;
+
+    if (fileList.length === 0) {
+      return (
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-primary/10 shadow-sm p-6 text-center">
+          <FolderOpen size={40} className="text-slate-400 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-slate-700 dark:text-slate-300 mb-2">
+            {emptyTitle}
+          </h3>
+          <p className="text-slate-500 dark:text-slate-400">{emptyDescription}</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-primary/10 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 dark:bg-slate-800/50">
+              <tr>
+                <th className="text-left font-medium px-4 py-3">Tên tệp</th>
+                <th className="text-left font-medium px-4 py-3">Kích thước</th>
+                <th className="text-left font-medium px-4 py-3">Mã hóa</th>
+                <th className="text-left font-medium px-4 py-3">Truy cập</th>
+                <th className="text-left font-medium px-4 py-3">Cập nhật</th>
+                <th className="text-left font-medium px-4 py-3">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody>
+              {fileList.map((file) => {
+                const rowFileId = file.id;
+                const isDownloading = downloadingFileId === rowFileId;
+                const isDeleting = deletingFileId === rowFileId;
+                const isEditing = showEditFile && editingFileId === rowFileId;
+                const isPreviewing = showPreview && previewingFileId === rowFileId;
+                const isInspectingEncryptedData =
+                  showEncryptedData && encryptedDataFile?.id === rowFileId;
+
+                return (
+                  <tr
+                    className="border-t border-primary/10"
+                    key={file.id || file.storage_path || file.filename}
+                  >
+                    <td className="px-4 py-3 font-medium">
+                      <div className="flex items-center gap-2">
+                        <span>{file.filename}</span>
+                        {showSharedBadge && (
+                          <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+                            Được chia sẻ
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                      {typeof file.size === "number"
+                        ? `${(file.size / 1024 / 1024).toFixed(2)} MB`
+                        : "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                      {file.encryption_type || "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                      {file.access_mode || "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                      {file.updated_at
+                        ? new Date(file.updated_at).toLocaleString("vi-VN")
+                        : "-"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="inline-flex items-center justify-center p-1.5 rounded-lg border border-primary/20 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                          disabled={
+                            !rowFileId ||
+                            isPreviewing ||
+                            isDownloading ||
+                            isDeleting ||
+                            isInspectingEncryptedData ||
+                            isEditing
+                          }
+                          onClick={() => openPreview(file)}
+                          title={isPreviewing ? "Đang xem trước" : "Xem trước"}
+                          type="button"
+                        >
+                          <Eye size={14} />
+                        </button>
+                        <button
+                          className="inline-flex items-center justify-center p-1.5 rounded-lg border border-primary/20 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                          disabled={
+                            !rowFileId ||
+                            isDownloading ||
+                            isDeleting ||
+                            isPreviewing ||
+                            isInspectingEncryptedData ||
+                            isEditing
+                          }
+                          onClick={() => openEncryptedData(file)}
+                          title={
+                            isInspectingEncryptedData
+                              ? "Đang xem dữ liệu mã hóa"
+                              : "Xem dữ liệu mã hóa"
+                          }
+                          type="button"
+                        >
+                          <FileCode2 size={14} />
+                        </button>
+                        {allowManage && (
+                          <button
+                            className="inline-flex items-center justify-center p-1.5 rounded-lg border border-primary/20 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={
+                              !rowFileId ||
+                              isDownloading ||
+                              isDeleting ||
+                              isPreviewing ||
+                              isInspectingEncryptedData ||
+                              isEditing
+                            }
+                            onClick={() => openEditFile(file)}
+                            title={isEditing ? "Đang chỉnh sửa" : "Chỉnh sửa"}
+                            type="button"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                        )}
+                        <button
+                          className="inline-flex items-center justify-center p-1.5 rounded-lg border border-primary/20 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                          disabled={
+                            !rowFileId ||
+                            isDownloading ||
+                            isDeleting ||
+                            isPreviewing ||
+                            isInspectingEncryptedData ||
+                            isEditing
+                          }
+                          onClick={() => handleDownload(rowFileId)}
+                          title={isDownloading ? "Đang lấy link tải" : "Tải xuống"}
+                          type="button"
+                        >
+                          <Download size={14} />
+                        </button>
+                        {allowManage && (
+                          <button
+                            className="inline-flex items-center justify-center p-1.5 rounded-lg border border-red-300 text-red-600 text-xs font-medium hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={
+                              !rowFileId ||
+                              isDeleting ||
+                              isDownloading ||
+                              isPreviewing ||
+                              isInspectingEncryptedData ||
+                              isEditing
+                            }
+                            onClick={() =>
+                              handleDelete(rowFileId, file.filename || "tệp tin này")
+                            }
+                            title={isDeleting ? "Đang xóa" : "Xóa"}
+                            type="button"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark">
@@ -959,13 +1138,6 @@ export default function Files() {
           </a>
           <a
             className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-            href="/whitelist"
-          >
-            <UserCheck size={20} />
-            <span>Danh sách tin cậy</span>
-          </a>
-          <a
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
             href="/settings"
           >
             <Settings size={20} />
@@ -992,45 +1164,7 @@ export default function Files() {
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <header className="h-16 border-b border-primary/10 bg-white dark:bg-slate-900 flex items-center justify-between px-8">
-          <div className="flex items-center gap-4 flex-1 max-w-xl">
-            <div className="relative w-full">
-              <Search
-                size={18}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-              />
-              <input
-                className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border-none rounded-lg focus:ring-1 focus:ring-primary text-sm"
-                placeholder="Tìm kiếm tệp tin..."
-                type="text"
-              />
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <button className="p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg relative">
-              <Bell size={20} />
-              <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white dark:border-slate-900"></span>
-            </button>
-            <div className="h-8 w-px bg-primary/10 mx-2"></div>
-            <div className="flex items-center gap-3">
-              <div className="text-right hidden sm:block">
-                <p className="text-sm font-semibold leading-none">
-                  {user?.name || "User"}
-                </p>
-                <p className="text-xs text-slate-500">{user?.email || ""}</p>
-              </div>
-              <div
-                className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 border-2 border-primary/20 bg-cover bg-center"
-                style={{
-                  backgroundImage: user?.avatar
-                    ? `url(${user.avatar})`
-                    : "none",
-                }}
-              ></div>
-            </div>
-          </div>
-        </header>
+        <AppHeader user={user} searchPlaceholder="Tìm kiếm tệp tin..." />
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-8">
@@ -1177,167 +1311,55 @@ export default function Files() {
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-primary/10 shadow-sm p-6 text-center">
                 <p className="text-slate-500 dark:text-slate-400">Đang tải danh sách tệp tin...</p>
               </div>
-            ) : files.length === 0 ? (
-              <div className="bg-white dark:bg-slate-900 rounded-xl border border-primary/10 shadow-sm p-6 text-center">
-                <FolderOpen size={48} className="text-slate-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  Chưa có tệp tin nào
-                </h3>
-                <p className="text-slate-500 dark:text-slate-400 mb-4">
-                  Tải lên tệp tin đầu tiên của bạn để bắt đầu mã hóa và bảo vệ dữ
-                  liệu.
-                </p>
-                <button
-                  className="bg-primary text-white px-6 py-2 rounded-lg font-medium hover:bg-orange-600 transition-colors"
-                  onClick={openUploadForm}
-                  type="button"
-                >
-                  Tải lên ngay
-                </button>
-              </div>
             ) : (
-              <div className="bg-white dark:bg-slate-900 rounded-xl border border-primary/10 shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-slate-50 dark:bg-slate-800/50">
-                      <tr>
-                        <th className="text-left font-medium px-4 py-3">Tên tệp</th>
-                        <th className="text-left font-medium px-4 py-3">Kích thước</th>
-                        <th className="text-left font-medium px-4 py-3">Mã hóa</th>
-                        <th className="text-left font-medium px-4 py-3">Truy cập</th>
-                        <th className="text-left font-medium px-4 py-3">Cập nhật</th>
-                        <th className="text-left font-medium px-4 py-3">Thao tác</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {files.map((file) => {
-                        const rowFileId = file.id;
-                        const isDownloading = downloadingFileId === rowFileId;
-                        const isDeleting = deletingFileId === rowFileId;
-                        const isEditing = showEditFile && editingFileId === rowFileId;
-                        const isPreviewing =
-                          showPreview && previewingFileId === rowFileId;
-                        const isInspectingEncryptedData =
-                          showEncryptedData && encryptedDataFile?.id === rowFileId;
+              <div className="space-y-8">
+                <section className="space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-xl font-semibold">Tệp tin của bạn</h2>
+                      <p className="text-sm text-slate-500 dark:text-slate-400">
+                        Các tệp bạn đã tải lên và có toàn quyền quản lý.
+                      </p>
+                    </div>
+                  </div>
 
-                        return (
-                          <tr
-                            className="border-t border-primary/10"
-                            key={file.id || file.storage_path || file.filename}
-                          >
-                            <td className="px-4 py-3 font-medium">{file.filename}</td>
-                            <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                              {typeof file.size === "number"
-                                ? `${(file.size / 1024 / 1024).toFixed(2)} MB`
-                                : "-"}
-                            </td>
-                            <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                              {file.encryption_type || "-"}
-                            </td>
-                            <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                              {file.access_mode || "-"}
-                            </td>
-                            <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                              {file.updated_at
-                                ? new Date(file.updated_at).toLocaleString("vi-VN")
-                                : "-"}
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <button
-                                  className="inline-flex items-center justify-center p-1.5 rounded-lg border border-primary/20 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                                  disabled={
-                                    !rowFileId ||
-                                    isPreviewing ||
-                                    isDownloading ||
-                                    isDeleting ||
-                                    isInspectingEncryptedData ||
-                                    isEditing
-                                  }
-                                  onClick={() => openPreview(file)}
-                                  title={isPreviewing ? "Đang xem trước" : "Xem trước"}
-                                  type="button"
-                                >
-                                  <Eye size={14} />
-                                </button>
-                                <button
-                                  className="inline-flex items-center justify-center p-1.5 rounded-lg border border-primary/20 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                                  disabled={
-                                    !rowFileId ||
-                                    isDownloading ||
-                                    isDeleting ||
-                                    isPreviewing ||
-                                    isInspectingEncryptedData ||
-                                    isEditing
-                                  }
-                                  onClick={() => openEncryptedData(file)}
-                                  title={
-                                    isInspectingEncryptedData
-                                      ? "Đang xem dữ liệu mã hóa"
-                                      : "Xem dữ liệu mã hóa"
-                                  }
-                                  type="button"
-                                >
-                                  <FileCode2 size={14} />
-                                </button>
-                                <button
-                                  className="inline-flex items-center justify-center p-1.5 rounded-lg border border-primary/20 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                                  disabled={
-                                    !rowFileId ||
-                                    isDownloading ||
-                                    isDeleting ||
-                                    isPreviewing ||
-                                    isInspectingEncryptedData ||
-                                    isEditing
-                                  }
-                                  onClick={() => openEditFile(file)}
-                                  title={isEditing ? "Đang chỉnh sửa" : "Chỉnh sửa"}
-                                  type="button"
-                                >
-                                  <Pencil size={14} />
-                                </button>
-                                <button
-                                  className="inline-flex items-center justify-center p-1.5 rounded-lg border border-primary/20 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                                  disabled={
-                                    !rowFileId ||
-                                    isDownloading ||
-                                    isDeleting ||
-                                    isPreviewing ||
-                                    isInspectingEncryptedData ||
-                                    isEditing
-                                  }
-                                  onClick={() => handleDownload(rowFileId)}
-                                  title={isDownloading ? "Đang lấy link tải" : "Tải xuống"}
-                                  type="button"
-                                >
-                                  <Download size={14} />
-                                </button>
-                                <button
-                                  className="inline-flex items-center justify-center p-1.5 rounded-lg border border-red-300 text-red-600 text-xs font-medium hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
-                                  disabled={
-                                    !rowFileId ||
-                                    isDeleting ||
-                                    isDownloading ||
-                                    isPreviewing ||
-                                    isInspectingEncryptedData ||
-                                    isEditing
-                                  }
-                                  onClick={() =>
-                                    handleDelete(rowFileId, file.filename || "tệp tin này")
-                                  }
-                                  title={isDeleting ? "Đang xóa" : "Xóa"}
-                                  type="button"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                  {ownedFiles.length === 0 ? (
+                    <div className="bg-white dark:bg-slate-900 rounded-xl border border-primary/10 shadow-sm p-6 text-center">
+                      <FolderOpen size={48} className="text-slate-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-slate-700 dark:text-slate-300 mb-2">
+                        Chưa có tệp tin nào
+                      </h3>
+                      <p className="text-slate-500 dark:text-slate-400 mb-4">
+                        Tải lên tệp tin đầu tiên của bạn để bắt đầu mã hóa và bảo vệ dữ liệu.
+                      </p>
+                      <button
+                        className="bg-primary text-white px-6 py-2 rounded-lg font-medium hover:bg-orange-600 transition-colors"
+                        onClick={openUploadForm}
+                        type="button"
+                      >
+                        Tải lên ngay
+                      </button>
+                    </div>
+                  ) : (
+                    renderFileTable(ownedFiles, { allowManage: true })
+                  )}
+                </section>
+
+                <section className="space-y-4">
+                  <div>
+                    <h2 className="text-xl font-semibold">Tệp tin được chia sẻ với bạn</h2>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      Các tệp mà người khác đã cấp quyền cho bạn qua whitelist.
+                    </p>
+                  </div>
+
+                  {renderFileTable(sharedFiles, {
+                    allowManage: false,
+                    showSharedBadge: true,
+                    emptyTitle: "Chưa có tệp nào được chia sẻ",
+                    emptyDescription: "Khi người khác thêm quyền cho bạn, tệp sẽ xuất hiện tại đây.",
+                  })}
+                </section>
               </div>
             )}
           </div>
@@ -1589,6 +1611,10 @@ export default function Files() {
                     )}
                   </div>
                   <div className="rounded-lg border border-primary/10 bg-slate-50 dark:bg-slate-800/50 p-4 text-sm grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <p>
+                      <span className="font-semibold">Loại mã hóa:</span>{" "}
+                      {encryptedDataFile?.encryption_type || "-"}
+                    </p>
                     <p>
                       <span className="font-semibold">Tổng bytes mã hóa:</span>{" "}
                       {encryptedDataInfo.totalEncryptedBytes}

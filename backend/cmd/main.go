@@ -13,6 +13,7 @@ import (
 	"github.com/aeshield/backend/internal/config"
 	"github.com/aeshield/backend/internal/database"
 	"github.com/aeshield/backend/internal/files"
+	"github.com/aeshield/backend/internal/notifications"
 	"github.com/aeshield/backend/internal/storage"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -57,12 +58,18 @@ func main() {
 	if err := fileRepo.CreateIndexes(context.Background()); err != nil {
 		log.Printf("Warning: failed to create file indexes: %v", err)
 	}
+	notificationRepo := storage.NewNotificationRepository(database.GetDB().Database)
+	if err := notificationRepo.CreateIndexes(context.Background()); err != nil {
+		log.Printf("Warning: failed to create notification indexes: %v", err)
+	}
 	userStorageRepo := storage.NewUserStorageRepository(database.GetDB().Database)
 	if err := userStorageRepo.CreateIndexes(context.Background()); err != nil {
 		log.Printf("Warning: failed to create user_storage indexes: %v", err)
 	}
-	fileService := files.NewService(r2Client, fileRepo, userStorageRepo)
+	fileService := files.NewService(r2Client, fileRepo, userStorageRepo, notificationRepo)
 	fileHandler := files.NewHandler(fileService)
+	notificationService := notifications.NewService(notificationRepo)
+	notificationHandler := notifications.NewHandler(notificationService)
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
@@ -95,6 +102,8 @@ func main() {
 	app.Get("/api/v1/auth/me", auth.JWTMiddleware(cfg.JWTSecret), authHandler.Me)
 	app.Get("/api/v1/users/lookup", auth.JWTMiddleware(cfg.JWTSecret), authHandler.LookupUserByEmail)
 	app.Post("/api/v1/users/resolve", auth.JWTMiddleware(cfg.JWTSecret), authHandler.ResolveUsersByID)
+	app.Get("/api/v1/notifications", auth.JWTMiddleware(cfg.JWTSecret), notificationHandler.List)
+	app.Post("/api/v1/notifications/read-all", auth.JWTMiddleware(cfg.JWTSecret), notificationHandler.MarkAllRead)
 
 	// File routes (protected)
 	app.Post("/api/v1/files/upload", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Upload)
