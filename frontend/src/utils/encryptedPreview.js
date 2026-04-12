@@ -8,6 +8,10 @@ const KEY_LENGTH_BY_HEADER_BYTE = {
   2: 16,
   3: 24,
   4: 32,
+  // legacy/buggy compatibility
+  16: 16,
+  24: 24,
+  32: 32,
 };
 
 const TEXT_MIME_BY_EXT = {
@@ -433,10 +437,7 @@ export function parseEncryptedHeader(encryptedBytes) {
   }
 
   const keyByte = encryptedBytes[4];
-  const keyLength = KEY_LENGTH_BY_HEADER_BYTE[keyByte];
-  if (!keyLength) {
-    throw new Error("Tệp mã hóa có kích thước khóa không được hỗ trợ.");
-  }
+  const keyLength = KEY_LENGTH_BY_HEADER_BYTE[keyByte] || null;
 
   const salt = encryptedBytes.slice(5, 21);
   const baseNonce = encryptedBytes.slice(21, 33);
@@ -444,23 +445,20 @@ export function parseEncryptedHeader(encryptedBytes) {
   return {
     keyByte,
     keyLength,
+    candidateKeyLengths: keyLength ? [keyLength] : [16, 24, 32],
     salt,
     baseNonce,
     dataOffset: HEADER_SIZE,
   };
 }
 
-export async function deriveKeyArgon2id(password, salt, keyLength) {
-  if (!password || !password.trim()) {
-    throw new Error("Vui lòng nhập mật khẩu để giải mã.");
-  }
-
+async function deriveKeyArgon2idWithParams(password, salt, keyLength, mem, parallelism) {
   const result = await argon2.hash({
     pass: password,
     salt,
     time: 1,
-    mem: 64 * 1024,
-    parallelism: 4,
+    mem,
+    parallelism,
     hashLen: keyLength,
     type: argon2.ArgonType.Argon2id,
   });
@@ -468,6 +466,15 @@ export async function deriveKeyArgon2id(password, salt, keyLength) {
   return result.hash instanceof Uint8Array
     ? result.hash
     : new Uint8Array(result.hash);
+}
+
+export async function deriveKeyArgon2id(password, salt, keyLength) {
+  if (!password || !password.trim()) {
+    throw new Error("Vui lòng nhập mật khẩu để giải mã.");
+  }
+
+  // Ưu tiên profile mới, fallback profile cũ để tương thích ngược
+  return deriveKeyArgon2idWithParams(password, salt, keyLength, 32 * 1024, 2);
 }
 
 export function deriveChunkNonce(baseNonce, chunkIndex) {
@@ -493,69 +500,88 @@ export async function decryptEncryptedFile(encryptedInput, password) {
       ? encryptedInput
       : new Uint8Array(encryptedInput);
 
-  const { keyLength, salt, baseNonce, dataOffset } =
+  const { keyLength, candidateKeyLengths, salt, baseNonce, dataOffset } =
     parseEncryptedHeader(encryptedBytes);
 
-  const rawKey = await deriveKeyArgon2id(password, salt, keyLength);
+  let lastError = null;
+  const argonProfiles = [
+    { mem: 32 * 1024, parallelism: 2 },
+    { mem: 64 * 1024, parallelism: 4 },
+  ];
 
-  const plaintextChunks = [];
-  let totalPlaintextLength = 0;
-  let offset = dataOffset;
-  let chunkIndex = 0;
+  for (const candidateKeyLength of candidateKeyLengths) {
+    for (const profile of argonProfiles) {
+      try {
+        const rawKey = await deriveKeyArgon2idWithParams(
+          password,
+          salt,
+          candidateKeyLength,
+          profile.mem,
+          profile.parallelism
+        );
 
-  while (offset < encryptedBytes.length) {
-    if (offset + 4 > encryptedBytes.length) {
-      throw new Error("Tệp mã hóa bị lỗi (thiếu độ dài chunk).");
-    }
+      const plaintextChunks = [];
+      let totalPlaintextLength = 0;
+      let offset = dataOffset;
+      let chunkIndex = 0;
 
-    const chunkLength = readChunkLength(encryptedBytes, offset);
-    offset += 4;
-
-    if (!Number.isFinite(chunkLength) || chunkLength < AUTH_TAG_SIZE) {
-      throw new Error("Tệp mã hóa bị lỗi (chunk không hợp lệ).");
-    }
-
-    if (offset + chunkLength > encryptedBytes.length) {
-      throw new Error("Tệp mã hóa bị lỗi (chunk vượt quá kích thước tệp).");
-    }
-
-    const cipherChunk = encryptedBytes.slice(offset, offset + chunkLength);
-    offset += chunkLength;
-
-    const nonce = deriveChunkNonce(baseNonce, chunkIndex);
-
-    try {
-      let plainChunk;
-      if (keyLength === 24) {
-        plainChunk = decryptChunkWithFallback(rawKey, nonce, cipherChunk);
-      } else {
-        try {
-          plainChunk = await decryptChunkWithWebCrypto(rawKey, nonce, cipherChunk);
-        } catch {
-          plainChunk = decryptChunkWithFallback(rawKey, nonce, cipherChunk);
+      while (offset < encryptedBytes.length) {
+        if (offset + 4 > encryptedBytes.length) {
+          throw new Error("Tệp mã hóa bị lỗi (thiếu độ dài chunk).");
         }
+
+        const chunkLength = readChunkLength(encryptedBytes, offset);
+        offset += 4;
+
+        if (!Number.isFinite(chunkLength) || chunkLength < AUTH_TAG_SIZE) {
+          throw new Error("Tệp mã hóa bị lỗi (chunk không hợp lệ).");
+        }
+
+        if (offset + chunkLength > encryptedBytes.length) {
+          throw new Error("Tệp mã hóa bị lỗi (chunk vượt quá kích thước tệp).");
+        }
+
+        const cipherChunk = encryptedBytes.slice(offset, offset + chunkLength);
+        offset += chunkLength;
+
+        const nonce = deriveChunkNonce(baseNonce, chunkIndex);
+
+        let plainChunk;
+        if (candidateKeyLength === 24) {
+          plainChunk = decryptChunkWithFallback(rawKey, nonce, cipherChunk);
+        } else {
+          try {
+            plainChunk = await decryptChunkWithWebCrypto(rawKey, nonce, cipherChunk);
+          } catch {
+            plainChunk = decryptChunkWithFallback(rawKey, nonce, cipherChunk);
+          }
+        }
+
+        plaintextChunks.push(plainChunk);
+        totalPlaintextLength += plainChunk.length;
+        chunkIndex += 1;
       }
 
-      plaintextChunks.push(plainChunk);
-      totalPlaintextLength += plainChunk.length;
-      chunkIndex += 1;
-    } catch (error) {
-      if (error instanceof Error && error.message) {
-        throw error;
+        const plaintext = new Uint8Array(totalPlaintextLength);
+        let writeOffset = 0;
+
+        for (const chunk of plaintextChunks) {
+          plaintext.set(chunk, writeOffset);
+          writeOffset += chunk.length;
+        }
+
+        return plaintext;
+      } catch (error) {
+        lastError = error;
       }
-      throw new Error("Giải mã thất bại. Mật khẩu không đúng hoặc dữ liệu đã bị thay đổi.");
     }
   }
 
-  const plaintext = new Uint8Array(totalPlaintextLength);
-  let writeOffset = 0;
-
-  for (const chunk of plaintextChunks) {
-    plaintext.set(chunk, writeOffset);
-    writeOffset += chunk.length;
+  if (lastError instanceof Error && keyLength) {
+    throw lastError;
   }
 
-  return plaintext;
+  throw new Error("Không thể xác định kích thước khóa từ header. Đã thử tự động giải mã với các khóa 128/192/256-bit nhưng không thành công.");
 }
 
 export function inspectEncryptedFile(encryptedInput, options = {}) {

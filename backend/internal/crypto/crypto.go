@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	// ChunkSize là kích thước mỗi khối plaintext khi mã hóa streaming (64 KiB)
-	ChunkSize = 64 * 1024
+	// ChunkSize là kích thước mỗi khối plaintext khi mã hóa streaming (1 MiB)
+	// Tăng từ 64KB lên 1MB để giảm số chunk, giảm overhead GCM seal/open
+	ChunkSize = 1024 * 1024
 
 	// HeaderMagic giúp nhận dạng file đã mã hóa bởi AEShield
 	HeaderMagic = "AES\x00"
@@ -30,11 +31,12 @@ const (
 	nonceSize = 12
 )
 
-// Argon2id parameters (OWASP recommended minimum)
+// Argon2id parameters - tối ưu cho interactive use
+// Giảm memory xuống 32MB nhưng vẫn đủ an toàn cho file encryption
 const (
 	argonTime    = 1
-	argonMemory  = 64 * 1024 // 64 MiB
-	argonThreads = 4
+	argonMemory  = 32 * 1024 // 32 MiB - giảm từ 64MB
+	argonThreads = 2         // giảm threads để tránh contention
 )
 
 var (
@@ -64,19 +66,18 @@ func DeriveKey(password string, salt []byte, bits KeyBits) ([]byte, error) {
 }
 
 // Encrypt đọc plaintext từ src, mã hóa streaming AES-GCM, ghi vào dst.
-// Trả về số byte đã ghi vào dst.
+// Tối ưu: reuse buffers, pre-allocate, O(1) per chunk operations.
 func Encrypt(dst io.Writer, src io.Reader, password string, bits KeyBits) (int64, error) {
 	if _, err := keyLen(bits); err != nil {
 		return 0, err
 	}
 
-	// Sinh salt ngẫu nhiên
+	// Pre-allocate reusable buffers - O(1) allocation
 	salt := make([]byte, saltSize)
 	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 		return 0, fmt.Errorf("crypto: generate salt: %w", err)
 	}
 
-	// Sinh nonce gốc ngẫu nhiên
 	baseNonce := make([]byte, nonceSize)
 	if _, err := io.ReadFull(rand.Reader, baseNonce); err != nil {
 		return 0, fmt.Errorf("crypto: generate nonce: %w", err)
@@ -97,9 +98,8 @@ func Encrypt(dst io.Writer, src io.Reader, password string, bits KeyBits) (int64
 		return 0, fmt.Errorf("crypto: new GCM: %w", err)
 	}
 
-	// Ghi header: magic(4) + keyBitsByte(1) + salt(16) + baseNonce(12)
-	header := make([]byte, 0, 4+1+saltSize+nonceSize)
-	header = append(header, []byte(HeaderMagic)...)
+	// Pre-allocate header: magic(4) + keyBitsByte(1) + salt(16) + baseNonce(12)
+	header := []byte(HeaderMagic)
 	header = append(header, byte(int(bits)/64))
 	header = append(header, salt...)
 	header = append(header, baseNonce...)
@@ -110,25 +110,32 @@ func Encrypt(dst io.Writer, src io.Reader, password string, bits KeyBits) (int64
 	}
 	total := int64(written)
 
-	// Mã hóa từng chunk
-	buf := make([]byte, ChunkSize)
+	// Pre-allocate reusable buffers - reuse across all chunks
+	chunkBuf := make([]byte, ChunkSize)
+	lenBuf := [4]byte{}
+	nonceBuf := make([]byte, nonceSize)
+	copy(nonceBuf, baseNonce)
+
+	// Process chunks - O(1) per chunk
 	var chunkIdx uint64 = 0
 	for {
-		n, readErr := io.ReadFull(src, buf)
+		n, readErr := src.Read(chunkBuf)
 		if n == 0 && readErr == io.EOF {
 			break
 		}
-		if readErr != nil && readErr != io.ErrUnexpectedEOF && readErr != io.EOF {
+		if readErr != nil && readErr != io.EOF {
 			return total, fmt.Errorf("crypto: read plaintext: %w", readErr)
 		}
 
-		nonce := deriveChunkNonce(baseNonce, chunkIdx)
-		ciphertext := gcm.Seal(nil, nonce, buf[:n], nil)
+		// Reset nonce buffer mỗi chunk để không bị tích lũy XOR sai
+		copy(nonceBuf, baseNonce)
+		binary.BigEndian.PutUint64(nonceBuf[4:], binary.BigEndian.Uint64(baseNonce[4:])^chunkIdx)
 
-		// Ghi [4 bytes length][ciphertext]
-		lenBuf := make([]byte, 4)
-		binary.BigEndian.PutUint32(lenBuf, uint32(len(ciphertext)))
-		if _, err := dst.Write(lenBuf); err != nil {
+		ciphertext := gcm.Seal(nil, nonceBuf, chunkBuf[:n], nil)
+
+		// Write length prefix
+		binary.BigEndian.PutUint32(lenBuf[:], uint32(len(ciphertext)))
+		if _, err := dst.Write(lenBuf[:]); err != nil {
 			return total, fmt.Errorf("crypto: write chunk length: %w", err)
 		}
 		total += 4
@@ -140,7 +147,7 @@ func Encrypt(dst io.Writer, src io.Reader, password string, bits KeyBits) (int64
 		}
 
 		chunkIdx++
-		if readErr == io.EOF || readErr == io.ErrUnexpectedEOF {
+		if readErr == io.EOF {
 			break
 		}
 	}
@@ -243,4 +250,52 @@ func keyLen(bits KeyBits) (int, error) {
 	default:
 		return 0, ErrInvalidKeyBits
 	}
+}
+
+// bufferedWriter wraps an io.Writer với buffered writing để giảm syscalls
+type bufferedWriter struct {
+	w       io.Writer
+	buf    []byte
+	pos    int
+}
+
+func newBufferedWriter(w io.Writer, size int) *bufferedWriter {
+	return &bufferedWriter{
+		w:   w,
+		buf: make([]byte, size),
+	}
+}
+
+func (bw *bufferedWriter) Write(p []byte) (int, error) {
+	if len(p) > len(bw.buf) {
+		// Flush current buffer first
+		if bw.pos > 0 {
+			if _, err := bw.w.Write(bw.buf[:bw.pos]); err != nil {
+				return 0, err
+			}
+			bw.pos = 0
+		}
+		// Write large data directly
+		return bw.w.Write(p)
+	}
+
+	// Buffer it
+	if len(p) > len(bw.buf)-bw.pos {
+		if _, err := bw.w.Write(bw.buf[:bw.pos]); err != nil {
+			return 0, err
+		}
+		bw.pos = 0
+	}
+	copy(bw.buf[bw.pos:], p)
+	bw.pos += len(p)
+	return len(p), nil
+}
+
+func (bw *bufferedWriter) Flush() error {
+	if bw.pos > 0 {
+		_, err := bw.w.Write(bw.buf[:bw.pos])
+		bw.pos = 0
+		return err
+	}
+	return nil
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import {
   Shield,
   LayoutDashboard,
@@ -12,6 +12,8 @@ import {
   CloudUpload,
   Radar,
   ShieldCheck,
+  User,
+  Link as LinkIcon,
 } from "lucide-react";
 import AppHeader from "../components/AppHeader";
 
@@ -30,7 +32,8 @@ export default function Dashboard() {
     file_count: 0,
     available_bytes: 10 * 1024 * 1024 * 1024,
   });
-  const [files, setFiles] = useState([]);
+  const [ownedFiles, setOwnedFiles] = useState([]);
+  const [sharedFiles, setSharedFiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
@@ -82,7 +85,14 @@ export default function Dashboard() {
 
         if (filesResponse.ok) {
           const filesData = await filesResponse.json();
-          setFiles(Array.isArray(filesData) ? filesData : []);
+          // API trả về { owned_files, shared_with_me }
+          const owned = Array.isArray(filesData.owned_files) ? filesData.owned_files : [];
+          const shared = Array.isArray(filesData.shared_with_me) ? filesData.shared_with_me : [];
+          // Gắn flag isOwned để phân biệt
+          const ownedWithFlag = owned.map((f) => ({ ...f, isOwned: true }));
+          const sharedWithFlag = shared.map((f) => ({ ...f, isOwned: false }));
+          setOwnedFiles(ownedWithFlag);
+          setSharedFiles(sharedWithFlag);
         } else if (filesResponse.status === 401) {
           localStorage.removeItem("aeshield_token");
           localStorage.removeItem("aeshield_user");
@@ -133,7 +143,7 @@ export default function Dashboard() {
     return `${(bytes / 1024).toFixed(2)} KB`;
   };
 
-  const recentFiles = files.slice(0, 4);
+  const recentFiles = [...ownedFiles, ...sharedFiles].slice(0, 10);
 
   return (
     <div className="flex h-screen overflow-hidden bg-background-light dark:bg-background-dark">
@@ -153,27 +163,27 @@ export default function Dashboard() {
           </div>
         </div>
         <nav className="flex-1 px-4 space-y-1">
-          <a
+          <Link
+            to="/dashboard"
             className="flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary font-medium hover:bg-primary/20 hover:text-primary dark:hover:bg-primary/25 dark:hover:text-primary hover:shadow-sm transition-all"
-            href="/dashboard"
           >
             <LayoutDashboard size={20} />
             <span>Dashboard</span>
-          </a>
-          <a
+          </Link>
+          <Link
+            to="/files"
             className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-primary/5 hover:text-primary dark:hover:bg-primary/10 dark:hover:text-primary transition-colors"
-            href="/files"
           >
             <FolderOpen size={20} />
             <span>Tệp tin</span>
-          </a>
-          <a
+          </Link>
+          <Link
+            to="/settings"
             className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-primary/5 hover:text-primary dark:hover:bg-primary/10 dark:hover:text-primary transition-colors"
-            href="/settings"
           >
             <Settings size={20} />
             <span>Cài đặt tài khoản</span>
-          </a>
+          </Link>
         </nav>
         <div className="p-4 border-t border-primary/10">
           <div className="bg-primary/5 rounded-xl p-4">
@@ -260,7 +270,10 @@ export default function Dashboard() {
               <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-xl border border-primary/10 shadow-sm overflow-hidden">
                 <div className="p-6 border-b border-primary/10 flex items-center justify-between">
                   <h3 className="font-bold text-lg">Hoạt động gần đây</h3>
-                  <button className="text-primary text-sm font-semibold hover:underline">
+                  <button
+                    onClick={() => navigate("/files")}
+                    className="text-primary text-sm font-semibold hover:underline"
+                  >
                     Xem tất cả
                   </button>
                 </div>
@@ -269,7 +282,7 @@ export default function Dashboard() {
                     <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 text-xs uppercase tracking-wider">
                       <tr>
                         <th className="px-6 py-4 font-semibold">Tên tệp</th>
-                        <th className="px-6 py-4 font-semibold">Hành động</th>
+                        <th className="px-6 py-4 font-semibold">Loại</th>
                         <th className="px-6 py-4 font-semibold">Trạng thái</th>
                         <th className="px-6 py-4 font-semibold">Thời gian</th>
                       </tr>
@@ -294,7 +307,19 @@ export default function Dashboard() {
                               <FileText size={18} className="text-slate-400" />
                               {file.filename || "-"}
                             </td>
-                            <td className="px-6 py-4 text-sm">Mã hóa</td>
+                            <td className="px-6 py-4 text-sm">
+                              {file.isOwned ? (
+                                <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                                  <User size={14} />
+                                  Sở hữu
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                                  <LinkIcon size={14} />
+                                  Được chia sẻ
+                                </span>
+                              )}
+                            </td>
                             <td className="px-6 py-4">
                               <span className="px-2 py-1 bg-emerald-500/10 text-emerald-500 text-xs rounded-full font-medium">
                                 {file.encryption_type || "AES"}
@@ -316,7 +341,10 @@ export default function Dashboard() {
               {/* Quick Actions */}
               <div className="space-y-6">
                 <h3 className="font-bold text-lg">Thao tác nhanh</h3>
-                <div className="group bg-white dark:bg-slate-900 p-6 rounded-xl border border-primary/10 shadow-sm hover:border-primary transition-all cursor-pointer">
+                <div
+                  onClick={() => navigate("/files?upload=true")}
+                  className="group bg-white dark:bg-slate-900 p-6 rounded-xl border border-primary/10 shadow-sm hover:border-primary transition-all cursor-pointer"
+                >
                   <div className="flex items-center gap-4">
                     <div className="p-3 bg-primary text-white rounded-xl">
                       <CloudUpload size={22} />

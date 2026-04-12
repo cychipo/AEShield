@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import {
   Shield,
   LayoutDashboard,
@@ -120,27 +120,27 @@ export default function Settings() {
           </div>
         </div>
         <nav className="flex-1 px-4 space-y-1">
-          <a
+          <Link
+            to="/dashboard"
             className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-primary/5 hover:text-primary dark:hover:bg-primary/10 dark:hover:text-primary transition-colors"
-            href="/dashboard"
           >
             <LayoutDashboard size={20} />
             <span>Dashboard</span>
-          </a>
-          <a
+          </Link>
+          <Link
+            to="/files"
             className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-primary/5 hover:text-primary dark:hover:bg-primary/10 dark:hover:text-primary transition-colors"
-            href="/files"
           >
             <FolderOpen size={20} />
             <span>Tệp tin</span>
-          </a>
-          <a
+          </Link>
+          <Link
+            to="/settings"
             className="flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary font-medium hover:bg-primary/20 hover:text-primary dark:hover:bg-primary/25 dark:hover:text-primary hover:shadow-sm transition-all"
-            href="/settings"
           >
             <SettingsIcon size={20} />
             <span>Cài đặt tài khoản</span>
-          </a>
+          </Link>
         </nav>
         <div className="p-4 border-t border-primary/10">
           <div className="bg-primary/5 rounded-xl p-4">

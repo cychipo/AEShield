@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { App as AntdApp, Modal } from "antd";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import {
   Shield,
   LayoutDashboard,
@@ -25,6 +25,7 @@ const API_BASE_URL =
   (import.meta.env.DEV ? "http://localhost:6888/api/v1" : "/api/v1");
 
 export default function Files() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showUploadForm, setShowUploadForm] = useState(false);
@@ -105,6 +106,15 @@ export default function Files() {
   useEffect(() => {
     fetchUser();
   }, []);
+
+  // Check for upload=true in URL and open upload form
+  useEffect(() => {
+    if (searchParams.get("upload") === "true") {
+      setShowUploadForm(true);
+      // Clear the URL param
+      setSearchParams({});
+    }
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     return () => {
@@ -1312,27 +1322,27 @@ export default function Files() {
           </div>
         </div>
         <nav className="flex-1 px-4 space-y-1">
-          <a
+          <Link
+            to="/dashboard"
             className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-primary/5 hover:text-primary dark:hover:bg-primary/10 dark:hover:text-primary transition-colors"
-            href="/dashboard"
           >
             <LayoutDashboard size={20} />
             <span>Dashboard</span>
-          </a>
-          <a
+          </Link>
+          <Link
+            to="/files"
             className="flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary font-medium hover:bg-primary/20 hover:text-primary dark:hover:bg-primary/25 dark:hover:text-primary hover:shadow-sm transition-all"
-            href="/files"
           >
             <FolderOpen size={20} />
             <span>Tệp tin</span>
-          </a>
-          <a
+          </Link>
+          <Link
+            to="/settings"
             className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-primary/5 hover:text-primary dark:hover:bg-primary/10 dark:hover:text-primary transition-colors"
-            href="/settings"
           >
             <Settings size={20} />
             <span>Cài đặt tài khoản</span>
-          </a>
+          </Link>
         </nav>
         <div className="p-4 border-t border-primary/10">
           <div className="bg-primary/5 rounded-xl p-4">
