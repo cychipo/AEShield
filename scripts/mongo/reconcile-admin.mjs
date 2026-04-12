@@ -72,10 +72,6 @@ if (!desiredExistsInfo.ok) {
 }
 const desiredExistingUser = desiredExistsInfo.users?.[0] || null;
 
-if (desiredExistingUser && desiredExistingUser.customData?.managedBy !== MONGO_DEPLOYMENT_MARKER) {
-  fail(`MongoDB user '${MONGO_ADMIN_USERNAME}' exists but is not deployment-managed.`);
-}
-
 if (!managedUser) {
   if (desiredExistingUser) {
     if (desiredCredentialsWork()) {
@@ -86,7 +82,7 @@ if (!managedUser) {
     adminDb.updateUser(MONGO_ADMIN_USERNAME, {
       pwd: MONGO_ADMIN_PASSWORD,
       roles: desiredExistingUser.roles,
-      customData: { ...(desiredExistingUser.customData || {}), managedBy: MONGO_DEPLOYMENT_MARKER },
+      customData: desiredExistingUser.customData || undefined,
     });
     print(`MongoDB admin user '${MONGO_ADMIN_USERNAME}' password updated.`);
     quit(0);
