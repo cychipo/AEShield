@@ -6,6 +6,7 @@ const {
   MONGO_ADMIN_USERNAME,
   MONGO_ADMIN_PASSWORD,
   MONGO_DEPLOYMENT_MARKER = "aeshield-deployment-managed",
+  MONGO_RECONCILE_AUTH_MODE = "bootstrap-root",
 } = process.env;
 
 function fail(message) {
@@ -30,6 +31,7 @@ const encodedAdminUser = encodeURIComponent(MONGO_ADMIN_USERNAME);
 const encodedAdminPassword = encodeURIComponent(MONGO_ADMIN_PASSWORD);
 const rootUri = `mongodb://${encodedRootUser}:${encodedRootPassword}@${MONGO_HOST}:${MONGO_PORT}/admin?authSource=admin`;
 const desiredUri = `mongodb://${encodedAdminUser}:${encodedAdminPassword}@${MONGO_HOST}:${MONGO_PORT}/admin?authSource=admin`;
+const reconcileUri = MONGO_RECONCILE_AUTH_MODE === "deploy-admin" ? desiredUri : rootUri;
 
 function connect(uri) {
   return new Mongo(uri).getDB("admin");
@@ -62,7 +64,7 @@ function desiredCredentialsWork() {
   }
 }
 
-const adminDb = connect(rootUri);
+const adminDb = connect(reconcileUri);
 const managedUser = getManagedUser(adminDb);
 const desiredExistsInfo = adminDb.runCommand({ usersInfo: MONGO_ADMIN_USERNAME, showCustomData: true });
 if (!desiredExistsInfo.ok) {
