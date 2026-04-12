@@ -58,6 +58,10 @@ func main() {
 	if err := fileRepo.CreateIndexes(context.Background()); err != nil {
 		log.Printf("Warning: failed to create file indexes: %v", err)
 	}
+	jobRepo := storage.NewJobRepository(database.GetDB().Database)
+	if err := jobRepo.CreateIndexes(context.Background()); err != nil {
+		log.Printf("Warning: failed to create job indexes: %v", err)
+	}
 	notificationRepo := storage.NewNotificationRepository(database.GetDB().Database)
 	if err := notificationRepo.CreateIndexes(context.Background()); err != nil {
 		log.Printf("Warning: failed to create notification indexes: %v", err)
@@ -66,8 +70,10 @@ func main() {
 	if err := userStorageRepo.CreateIndexes(context.Background()); err != nil {
 		log.Printf("Warning: failed to create user_storage indexes: %v", err)
 	}
-	fileService := files.NewService(r2Client, fileRepo, userStorageRepo, notificationRepo)
+	jobService := files.NewJobService(jobRepo)
+	fileService := files.NewService(r2Client, fileRepo, userStorageRepo, notificationRepo, jobService)
 	fileHandler := files.NewHandler(fileService)
+	jobHandler := files.NewJobHandler(jobService, fileService)
 	notificationService := notifications.NewService(notificationRepo)
 	notificationHandler := notifications.NewHandler(notificationService)
 
@@ -113,6 +119,10 @@ func main() {
 	app.Patch("/api/v1/files/share", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Share)
 	app.Patch("/api/v1/files/:id", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.Share)
 	app.Get("/api/v1/storage/me", auth.JWTMiddleware(cfg.JWTSecret), fileHandler.GetMyStorage)
+	app.Post("/api/v1/jobs", auth.JWTMiddleware(cfg.JWTSecret), jobHandler.Create)
+	app.Get("/api/v1/jobs", auth.JWTMiddleware(cfg.JWTSecret), jobHandler.List)
+	app.Get("/api/v1/jobs/:id", auth.JWTMiddleware(cfg.JWTSecret), jobHandler.Get)
+	app.Delete("/api/v1/jobs/:id", auth.JWTMiddleware(cfg.JWTSecret), jobHandler.Cancel)
 
 	// Serve frontend static files
 	app.Static("/", frontendDist)

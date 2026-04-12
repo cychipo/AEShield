@@ -65,9 +65,15 @@ func DeriveKey(password string, salt []byte, bits KeyBits) ([]byte, error) {
 	return key, nil
 }
 
+type ProgressCallback func(processedBytes int64) error
+
 // Encrypt đọc plaintext từ src, mã hóa streaming AES-GCM, ghi vào dst.
 // Tối ưu: reuse buffers, pre-allocate, O(1) per chunk operations.
 func Encrypt(dst io.Writer, src io.Reader, password string, bits KeyBits) (int64, error) {
+	return EncryptWithProgress(dst, src, password, bits, nil)
+}
+
+func EncryptWithProgress(dst io.Writer, src io.Reader, password string, bits KeyBits, progress ProgressCallback) (int64, error) {
 	if _, err := keyLen(bits); err != nil {
 		return 0, err
 	}
@@ -145,6 +151,11 @@ func Encrypt(dst io.Writer, src io.Reader, password string, bits KeyBits) (int64
 		if err != nil {
 			return total, fmt.Errorf("crypto: write chunk: %w", err)
 		}
+		if progress != nil {
+			if err := progress(int64((chunkIdx * ChunkSize) + uint64(n))); err != nil {
+				return total, err
+			}
+		}
 
 		chunkIdx++
 		if readErr == io.EOF {
@@ -158,6 +169,10 @@ func Encrypt(dst io.Writer, src io.Reader, password string, bits KeyBits) (int64
 // Decrypt membaca ciphertext dari src, mendekripsi, menulis plaintext ke dst.
 // Password harus cocok dengan yang dipakai saat Encrypt.
 func Decrypt(dst io.Writer, src io.Reader, password string) error {
+	return DecryptWithProgress(dst, src, password, nil)
+}
+
+func DecryptWithProgress(dst io.Writer, src io.Reader, password string, progress ProgressCallback) error {
 	// Baca header
 	headerBuf := make([]byte, 4+1+saltSize+nonceSize)
 	if _, err := io.ReadFull(src, headerBuf); err != nil {
@@ -191,9 +206,9 @@ func Decrypt(dst io.Writer, src io.Reader, password string) error {
 		return fmt.Errorf("crypto: new GCM: %w", err)
 	}
 
-	// Giải mã từng chunk
 	lenBuf := make([]byte, 4)
 	var chunkIdx uint64 = 0
+	var processedBytes int64
 	for {
 		_, err := io.ReadFull(src, lenBuf)
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
@@ -217,6 +232,12 @@ func Decrypt(dst io.Writer, src io.Reader, password string) error {
 
 		if _, err := dst.Write(plaintext); err != nil {
 			return fmt.Errorf("crypto: write plaintext: %w", err)
+		}
+		processedBytes += int64(len(plaintext))
+		if progress != nil {
+			if err := progress(processedBytes); err != nil {
+				return err
+			}
 		}
 
 		chunkIdx++

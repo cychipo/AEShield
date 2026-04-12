@@ -83,6 +83,17 @@ func (r *R2Client) DeleteFile(ctx context.Context, key string) error {
 	return nil
 }
 
+func (r *R2Client) GetFile(ctx context.Context, key string) (io.ReadCloser, error) {
+	result, err := r.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(r.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file from R2: %w", err)
+	}
+	return result.Body, nil
+}
+
 // GeneratePresignedURL tạo presigned URL để download file (mặc định 1 giờ)
 func (r *R2Client) GeneratePresignedURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
 	presignClient := s3.NewPresignClient(r.client)

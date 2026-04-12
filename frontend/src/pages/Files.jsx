@@ -14,11 +14,9 @@ import {
   Trash2,
 } from "lucide-react";
 import AppHeader from "../components/AppHeader";
-import {
-  decryptEncryptedFile,
-  detectPreviewType,
-  inspectEncryptedFile,
-} from "../utils/encryptedPreview";
+import JobProgress from "../components/JobProgress";
+import useJobPolling from "../hooks/useJobPolling";
+import { detectPreviewType, inspectEncryptedFile } from "../utils/encryptedPreview";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL ||
@@ -34,6 +32,8 @@ export default function Files() {
   const [encryptionType, setEncryptionType] = useState("AES-256");
   const [accessMode, setAccessMode] = useState("private");
   const [uploading, setUploading] = useState(false);
+  const [uploadJobId, setUploadJobId] = useState("");
+  const [cancellingUploadJob, setCancellingUploadJob] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [uploadSuccess, setUploadSuccess] = useState("");
   const [lastUploadedFile, setLastUploadedFile] = useState(null);
@@ -54,6 +54,11 @@ export default function Files() {
   const [previewType, setPreviewType] = useState("unsupported");
   const [previewText, setPreviewText] = useState("");
   const [previewObjectUrl, setPreviewObjectUrl] = useState("");
+  const [decryptJobId, setDecryptJobId] = useState("");
+  const [cancellingDecryptJob, setCancellingDecryptJob] = useState(false);
+  const [jobs, setJobs] = useState([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobsError, setJobsError] = useState("");
 
   const [showEncryptedData, setShowEncryptedData] = useState(false);
   const [encryptedDataFile, setEncryptedDataFile] = useState(null);
@@ -84,8 +89,26 @@ export default function Files() {
   });
   const fileInputRef = useRef(null);
   const previewObjectUrlRef = useRef("");
+  const handledUploadJobRef = useRef("");
+  const handledDecryptJobRef = useRef("");
   const { message } = AntdApp.useApp();
   const navigate = useNavigate();
+  const {
+    job: uploadJob,
+    error: uploadJobPollingError,
+    stop: stopUploadJobPolling,
+  } = useJobPolling({
+    jobId: uploadJobId,
+    enabled: Boolean(uploadJobId),
+  });
+  const {
+    job: decryptJob,
+    error: decryptJobPollingError,
+    stop: stopDecryptJobPolling,
+  } = useJobPolling({
+    jobId: decryptJobId,
+    enabled: Boolean(decryptJobId),
+  });
 
   const formatStorageValue = (bytes) => {
     if (!Number.isFinite(bytes) || bytes <= 0) {
@@ -102,6 +125,72 @@ export default function Files() {
 
     return `${(bytes / 1024).toFixed(2)} KB`;
   };
+
+  const decodeBase64ToBytes = (value) => {
+    const normalized = typeof value === "string" ? value.trim() : "";
+    if (!normalized) {
+      return new Uint8Array();
+    }
+
+    const binary = window.atob(normalized);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+  };
+
+  const fetchJobs = useCallback(
+    async (token, options = {}) => {
+      const { silent = false } = options;
+      if (!token) {
+        return;
+      }
+
+      if (!silent) {
+        setJobsLoading(true);
+      }
+      setJobsError("");
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/jobs?limit=20`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          if (response.status === 401) {
+            localStorage.removeItem("aeshield_token");
+            localStorage.removeItem("aeshield_user");
+            navigate("/", { replace: true });
+            return;
+          }
+
+          let payload = null;
+          try {
+            payload = await response.json();
+          } catch {
+            payload = null;
+          }
+
+          setJobsError(payload?.error || "Không thể tải lịch sử tác vụ.");
+          return;
+        }
+
+        const payload = await response.json();
+        setJobs(Array.isArray(payload?.jobs) ? payload.jobs : []);
+      } catch (error) {
+        console.error("Error fetching jobs:", error);
+        setJobsError("Có lỗi xảy ra khi tải lịch sử tác vụ.");
+      } finally {
+        if (!silent) {
+          setJobsLoading(false);
+        }
+      }
+    },
+    [navigate]
+  );
 
   useEffect(() => {
     fetchUser();
@@ -121,8 +210,165 @@ export default function Files() {
       if (previewObjectUrlRef.current) {
         URL.revokeObjectURL(previewObjectUrlRef.current);
       }
+      stopUploadJobPolling();
+      stopDecryptJobPolling();
     };
-  }, []);
+  }, [stopDecryptJobPolling, stopUploadJobPolling]);
+
+  useEffect(() => {
+    if (!uploadJobId) {
+      handledUploadJobRef.current = "";
+      return;
+    }
+
+    if (!uploadJob) {
+      return;
+    }
+
+    if (uploadJob.status === "completed") {
+      if (handledUploadJobRef.current === uploadJob.id) {
+        return;
+      }
+      handledUploadJobRef.current = uploadJob.id;
+      resetUploadJobState();
+      setUploadError("");
+      setUploadSuccess(`Tải lên thành công: ${uploadJob.filename || selectedFile?.name || "tệp tin"}`);
+      setLastUploadedFile(uploadJob.result || { filename: uploadJob.filename });
+      setSelectedFile(null);
+      setPassword("");
+      setSelectedFileIds(new Set());
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      const token = localStorage.getItem("aeshield_token");
+      if (token) {
+        fetchFiles(token);
+        fetchJobs(token, { silent: true });
+      }
+      return;
+    }
+
+    if (uploadJob.status === "failed") {
+      if (handledUploadJobRef.current === uploadJob.id) {
+        return;
+      }
+      handledUploadJobRef.current = uploadJob.id;
+      resetUploadJobState();
+      setUploadError(uploadJob.error?.message || "Tải lên thất bại. Vui lòng thử lại.");
+      const token = localStorage.getItem("aeshield_token");
+      if (token) {
+        fetchJobs(token, { silent: true });
+      }
+      return;
+    }
+
+    if (uploadJob.status === "cancelled") {
+      if (handledUploadJobRef.current === uploadJob.id) {
+        return;
+      }
+      handledUploadJobRef.current = uploadJob.id;
+      resetUploadJobState();
+      setUploadError("Tác vụ tải lên đã bị hủy.");
+      const token = localStorage.getItem("aeshield_token");
+      if (token) {
+        fetchJobs(token, { silent: true });
+      }
+    }
+  }, [fetchJobs, uploadJob, uploadJobId, selectedFile]);
+
+  useEffect(() => {
+    if (!uploadJobPollingError || uploadJob) {
+      return;
+    }
+    setUploadError(uploadJobPollingError);
+  }, [uploadJobPollingError, uploadJob]);
+
+  useEffect(() => {
+    if (!decryptJobId) {
+      handledDecryptJobRef.current = "";
+      return;
+    }
+
+    if (!decryptJob) {
+      return;
+    }
+
+    if (decryptJob.status === "completed") {
+      if (handledDecryptJobRef.current === decryptJob.id) {
+        return;
+      }
+      handledDecryptJobRef.current = decryptJob.id;
+      resetDecryptJobState();
+      setPreviewError("");
+      setPreviewPassword("");
+
+      const result = decryptJob.result || {};
+      const nextPreviewType = result.preview_type || detectPreviewType(previewFile?.filename || decryptJob.filename || "").type;
+      const bytes = decodeBase64ToBytes(result.content_base64 || "");
+
+      setPreviewType(nextPreviewType);
+      setPreviewText("");
+      clearPreviewObjectUrl();
+
+      if (nextPreviewType === "text") {
+        const decodedText = new TextDecoder("utf-8").decode(bytes);
+        setPreviewText(decodedText);
+      } else if (["image", "pdf"].includes(nextPreviewType) && bytes.length > 0) {
+        const blob = new Blob([bytes], {
+          type: result.mime_type || detectPreviewType(previewFile?.filename || decryptJob.filename || "").mimeType,
+        });
+        const nextObjectUrl = URL.createObjectURL(blob);
+        previewObjectUrlRef.current = nextObjectUrl;
+        setPreviewObjectUrl(nextObjectUrl);
+      }
+
+      const token = localStorage.getItem("aeshield_token");
+      if (token) {
+        fetchJobs(token, { silent: true });
+      }
+      return;
+    }
+
+    if (decryptJob.status === "failed") {
+      if (handledDecryptJobRef.current === decryptJob.id) {
+        return;
+      }
+      handledDecryptJobRef.current = decryptJob.id;
+      resetDecryptJobState();
+      setPreviewText("");
+      clearPreviewObjectUrl();
+      setPreviewError(decryptJob.error?.message || "Giải mã thất bại. Vui lòng thử lại.");
+      const token = localStorage.getItem("aeshield_token");
+      if (token) {
+        fetchJobs(token, { silent: true });
+      }
+      return;
+    }
+
+    if (decryptJob.status === "cancelled") {
+      if (handledDecryptJobRef.current === decryptJob.id) {
+        return;
+      }
+      handledDecryptJobRef.current = decryptJob.id;
+      resetDecryptJobState();
+      setPreviewText("");
+      clearPreviewObjectUrl();
+      setPreviewError("Tác vụ giải mã đã bị hủy.");
+      const token = localStorage.getItem("aeshield_token");
+      if (token) {
+        fetchJobs(token, { silent: true });
+      }
+    }
+  }, [decryptJob, decryptJobId, fetchJobs, previewFile]);
+
+  useEffect(() => {
+    if (!decryptJobPollingError || decryptJob) {
+      return;
+    }
+    setPreviewLoading(false);
+    setPreviewStage("");
+    setPreviewError(decryptJobPollingError);
+  }, [decryptJobPollingError, decryptJob]);
 
   const fetchUser = async () => {
     const token = localStorage.getItem("aeshield_token");
@@ -159,7 +405,7 @@ export default function Files() {
           return;
         }
 
-        await fetchFiles(token);
+        await Promise.all([fetchFiles(token), fetchJobs(token)]);
       } else {
         localStorage.removeItem("aeshield_token");
         localStorage.removeItem("aeshield_user");
@@ -425,6 +671,13 @@ export default function Files() {
     setPreviewObjectUrl("");
   };
 
+  const resetDecryptJobState = () => {
+    setPreviewLoading(false);
+    setPreviewStage("");
+    setDecryptJobId("");
+    setCancellingDecryptJob(false);
+  };
+
   const closePreview = () => {
     if (previewLoading) {
       return;
@@ -434,11 +687,11 @@ export default function Files() {
     setPreviewingFileId("");
     setPreviewFile(null);
     setPreviewPassword("");
-    setPreviewLoading(false);
-    setPreviewStage("");
+    resetDecryptJobState();
     setPreviewError("");
     setPreviewType("unsupported");
     setPreviewText("");
+    handledDecryptJobRef.current = "";
     clearPreviewObjectUrl();
   };
 
@@ -874,16 +1127,26 @@ export default function Files() {
     }
 
     setPreviewLoading(true);
-    setPreviewStage("Đang lấy liên kết tải...");
+    setPreviewStage("Đang khởi tạo tác vụ giải mã...");
     setPreviewError("");
     setPreviewText("");
+    setDecryptJobId("");
+    setCancellingDecryptJob(false);
+    handledDecryptJobRef.current = "";
     clearPreviewObjectUrl();
 
     try {
-      const response = await fetch(`${API_BASE_URL}/files/${fileId}/download`, {
+      const formData = new FormData();
+      formData.append("type", "decrypt");
+      formData.append("file_id", fileId);
+      formData.append("password", inputPassword);
+
+      const response = await fetch(`${API_BASE_URL}/jobs`, {
+        method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
         },
+        body: formData,
       });
 
       let payload = null;
@@ -901,63 +1164,35 @@ export default function Files() {
           return;
         }
 
-        setPreviewError(payload?.error || "Không thể lấy tệp tin để xem trước.");
+        setPreviewLoading(false);
+        setPreviewStage("");
+        setPreviewError(payload?.error || "Không thể tạo tác vụ giải mã.");
         return;
       }
 
-      if (!payload?.url) {
-        setPreviewError("Không nhận được đường dẫn tải tệp tin.");
-        return;
-      }
-
-      setPreviewStage("Đang tải dữ liệu mã hóa...");
-      const encryptedResponse = await fetch(payload.url);
-      if (!encryptedResponse.ok) {
-        setPreviewError("Không thể tải dữ liệu tệp tin.");
-        return;
-      }
-
-      const encryptedBuffer = await encryptedResponse.arrayBuffer();
-
+      setDecryptJobId(payload?.job_id || "");
       setPreviewStage("Đang giải mã tệp tin...");
-      const plaintextBytes = await decryptEncryptedFile(
-        new Uint8Array(encryptedBuffer),
-        inputPassword
-      );
-
-      setPreviewStage("Đang chuẩn bị hiển thị...");
-      setPreviewType(detectedType.type);
-
-      if (detectedType.type === "text") {
-        const decodedText = new TextDecoder("utf-8").decode(plaintextBytes);
-        setPreviewText(decodedText);
-      } else {
-        const blob = new Blob([plaintextBytes], { type: detectedType.mimeType });
-        const nextObjectUrl = URL.createObjectURL(blob);
-        previewObjectUrlRef.current = nextObjectUrl;
-        setPreviewObjectUrl(nextObjectUrl);
-      }
-
-      setPreviewError("");
     } catch (error) {
-      setPreviewText("");
-      clearPreviewObjectUrl();
-      setPreviewError(
-        error instanceof Error && error.message
-          ? error.message
-          : "Có lỗi xảy ra khi giải mã xem trước."
-      );
-    } finally {
+      console.error("Error creating decrypt job:", error);
       setPreviewLoading(false);
       setPreviewStage("");
-      setPreviewPassword("");
+      setPreviewError("Có lỗi xảy ra khi khởi tạo tác vụ giải mã.");
     }
+  };
+
+  const resetUploadJobState = () => {
+    setUploading(false);
+    setUploadJobId("");
+    setCancellingUploadJob(false);
+    handledUploadJobRef.current = "";
   };
 
   const openUploadForm = () => {
     setShowUploadForm(true);
+    setUploadJobId("");
     setUploadError("");
     setUploadSuccess("");
+    handledUploadJobRef.current = "";
   };
 
   const closeUploadForm = () => {
@@ -970,8 +1205,11 @@ export default function Files() {
     setPassword("");
     setEncryptionType("AES-256");
     setAccessMode("private");
+    setUploadJobId("");
     setUploadError("");
     setUploadSuccess("");
+    setCancellingUploadJob(false);
+    handledUploadJobRef.current = "";
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -1008,15 +1246,18 @@ export default function Files() {
     }
 
     setUploading(true);
+    setCancellingUploadJob(false);
+    handledUploadJobRef.current = "";
 
     try {
       const formData = new FormData();
+      formData.append("type", "encrypt");
       formData.append("file", selectedFile);
       formData.append("password", password);
       formData.append("encryption_type", encryptionType);
       formData.append("access_mode", accessMode);
 
-      const response = await fetch(`${API_BASE_URL}/files/upload`, {
+      const response = await fetch(`${API_BASE_URL}/jobs`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -1039,27 +1280,116 @@ export default function Files() {
           return;
         }
 
-        setUploadError(payload?.error || "Tải lên thất bại. Vui lòng thử lại.");
+        setUploading(false);
+        setUploadError(payload?.error || "Không thể tạo tác vụ tải lên.");
         return;
       }
 
-      setLastUploadedFile(payload);
-      setUploadSuccess(
-        `Tải lên thành công: ${payload?.filename || selectedFile.name}`
-      );
-      setSelectedFile(null);
-      setSelectedFileIds(new Set());
-      await fetchFiles(token);
-
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      setUploadJobId(payload?.job_id || "");
     } catch (error) {
       console.error("Error uploading file:", error);
-      setUploadError("Có lỗi xảy ra khi tải lên tệp tin.");
-    } finally {
       setUploading(false);
-      setPassword("");
+      setUploadError("Có lỗi xảy ra khi khởi tạo tác vụ tải lên.");
+    }
+  };
+
+  const handleCancelUploadJob = async () => {
+    if (!uploadJobId) {
+      return;
+    }
+
+    const token = localStorage.getItem("aeshield_token");
+    if (!token) {
+      navigate("/", { replace: true });
+      return;
+    }
+
+    setCancellingUploadJob(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/jobs/${uploadJobId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem("aeshield_token");
+          localStorage.removeItem("aeshield_user");
+          navigate("/", { replace: true });
+          return;
+        }
+
+        setUploadError(payload?.error || "Không thể hủy tác vụ tải lên.");
+        return;
+      }
+
+      resetUploadJobState();
+      setUploadError("Tác vụ tải lên đã bị hủy.");
+      fetchJobs(token, { silent: true });
+    } catch (error) {
+      console.error("Error cancelling upload job:", error);
+      setUploadError("Có lỗi xảy ra khi hủy tác vụ tải lên.");
+    } finally {
+      setCancellingUploadJob(false);
+    }
+  };
+
+  const handleCancelDecryptJob = async () => {
+    if (!decryptJobId) {
+      return;
+    }
+
+    const token = localStorage.getItem("aeshield_token");
+    if (!token) {
+      navigate("/", { replace: true });
+      return;
+    }
+
+    setCancellingDecryptJob(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/jobs/${decryptJobId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem("aeshield_token");
+          localStorage.removeItem("aeshield_user");
+          navigate("/", { replace: true });
+          return;
+        }
+
+        setPreviewError(payload?.error || "Không thể hủy tác vụ giải mã.");
+        return;
+      }
+
+      resetDecryptJobState();
+      setPreviewError("Tác vụ giải mã đã bị hủy.");
+      fetchJobs(token, { silent: true });
+    } catch (error) {
+      console.error("Error cancelling decrypt job:", error);
+      setPreviewError("Có lỗi xảy ra khi hủy tác vụ giải mã.");
+    } finally {
+      setCancellingDecryptJob(false);
     }
   };
 
@@ -1456,7 +1786,16 @@ export default function Files() {
                     </div>
                   </div>
 
-                  {uploadError && (
+                  {uploadJobId && (
+                    <JobProgress
+                      job={uploadJob}
+                      error={uploadJobPollingError || uploadError}
+                      onCancel={handleCancelUploadJob}
+                      cancelling={cancellingUploadJob}
+                    />
+                  )}
+
+                  {uploadError && !uploadJobId && (
                     <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 px-3 py-2 text-sm dark:bg-red-950/30 dark:border-red-800 dark:text-red-300">
                       {uploadError}
                     </div>
@@ -1505,6 +1844,88 @@ export default function Files() {
               <div className="mb-6 rounded-xl border border-red-200 bg-red-50 text-red-700 px-4 py-3 text-sm dark:bg-red-950/30 dark:border-red-800 dark:text-red-300">
                 {filesError}
               </div>
+            )}
+
+            {batchDeleteErrors.length > 0 && (
+              <div className="mb-6 rounded-xl border border-yellow-200 bg-yellow-50 text-yellow-700 px-4 py-3 text-sm dark:bg-yellow-950/30 dark:border-yellow-800 dark:text-yellow-300">
+                Một số tệp không thể xóa: {batchDeleteErrors.map((item) => item.name).join(", ")}
+              </div>
+            )}
+
+            {jobsLoading ? (
+              <div className="mb-6 bg-white dark:bg-slate-900 rounded-xl border border-primary/10 shadow-sm p-6">
+                <div className="animate-pulse space-y-3">
+                  <div className="h-4 w-48 rounded bg-slate-200 dark:bg-slate-700"></div>
+                  <div className="h-12 rounded bg-slate-100 dark:bg-slate-800"></div>
+                  <div className="h-12 rounded bg-slate-100 dark:bg-slate-800"></div>
+                </div>
+              </div>
+            ) : (
+              <section className="mb-6 bg-white dark:bg-slate-900 rounded-xl border border-primary/10 shadow-sm p-6 space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold">Lịch sử tác vụ</h2>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      20 tác vụ gần nhất cho tải lên và giải mã.
+                    </p>
+                  </div>
+                  <button
+                    className="px-3 py-1.5 rounded-lg border border-primary/20 text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-800"
+                    onClick={() => {
+                      const token = localStorage.getItem("aeshield_token");
+                      if (token) {
+                        fetchJobs(token);
+                      }
+                    }}
+                    type="button"
+                  >
+                    Làm mới
+                  </button>
+                </div>
+
+                {jobsError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 px-3 py-2 text-sm dark:bg-red-950/30 dark:border-red-800 dark:text-red-300">
+                    {jobsError}
+                  </div>
+                )}
+
+                {jobs.length === 0 ? (
+                  <div className="rounded-lg border border-primary/20 bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 px-3 py-2 text-sm">
+                    Chưa có tác vụ nào được ghi nhận.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 dark:bg-slate-800/50">
+                        <tr>
+                          <th className="text-left font-medium px-4 py-3">Tệp tin</th>
+                          <th className="text-left font-medium px-4 py-3">Loại</th>
+                          <th className="text-left font-medium px-4 py-3">Trạng thái</th>
+                          <th className="text-left font-medium px-4 py-3">Tiến độ</th>
+                          <th className="text-left font-medium px-4 py-3">Cập nhật</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {jobs.map((job) => (
+                          <tr className="border-t border-primary/10" key={job.id || `${job.type}-${job.created_at}`}>
+                            <td className="px-4 py-3 font-medium">{job.filename || "-"}</td>
+                            <td className="px-4 py-3 uppercase text-slate-600 dark:text-slate-300">{job.type || "-"}</td>
+                            <td className="px-4 py-3">
+                              <span className="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                                {job.status || "-"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{typeof job.progress === "number" ? `${job.progress}%` : "-"}</td>
+                            <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                              {job.updated_at ? new Date(job.updated_at).toLocaleString("vi-VN") : "-"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
             )}
 
             {filesLoading ? (
@@ -1947,7 +2368,16 @@ export default function Files() {
                 </div>
               </form>
 
-              {previewLoading && previewStage && (
+              {decryptJobId && (
+                <JobProgress
+                  job={decryptJob}
+                  error={decryptJobPollingError || previewError}
+                  onCancel={handleCancelDecryptJob}
+                  cancelling={cancellingDecryptJob}
+                />
+              )}
+
+              {previewLoading && previewStage && !decryptJobId && (
                 <div className="rounded-lg border border-primary/20 bg-primary/5 text-primary px-3 py-2 text-sm">
                   {previewStage}
                 </div>

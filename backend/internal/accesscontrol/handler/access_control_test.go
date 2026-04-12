@@ -23,6 +23,13 @@ type MockAccessControlRepository struct {
 	mock.Mock
 }
 
+func normalizeResourceTypes(resourceTypes []string) []string {
+	if resourceTypes == nil {
+		return []string{}
+	}
+	return resourceTypes
+}
+
 func (m *MockAccessControlRepository) CreateRule(ctx context.Context, rule *acmodels.AccessRule) error {
 	args := m.Called(ctx, rule)
 	return args.Error(0)
@@ -37,7 +44,7 @@ func (m *MockAccessControlRepository) GetRuleByID(ctx context.Context, id interf
 }
 
 func (m *MockAccessControlRepository) GetRuleByResource(ctx context.Context, resourceID string, resourceTypes ...string) (*acmodels.AccessRule, error) {
-	args := m.Called(ctx, resourceID, resourceTypes)
+	args := m.Called(ctx, resourceID, normalizeResourceTypes(resourceTypes))
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -183,7 +190,7 @@ func TestGetRule(t *testing.T) {
 	t.Run("Success with authenticated owner", func(t *testing.T) {
 		testApp := NewTestApp()
 
-		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string(nil)).Return(&acmodels.AccessRule{
+		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string{}).Return(&acmodels.AccessRule{
 			ResourceID:   "test-resource",
 			ResourceType: "file",
 			OwnerID:      "user-123",
@@ -210,7 +217,7 @@ func TestGetRule(t *testing.T) {
 	t.Run("Success with non-owner or unauthenticated", func(t *testing.T) {
 		testApp := NewTestApp()
 
-		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string(nil)).Return(&acmodels.AccessRule{
+		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string{}).Return(&acmodels.AccessRule{
 			ResourceID:   "test-resource",
 			ResourceType: "file",
 			OwnerID:      "owner-123",
@@ -239,7 +246,7 @@ func TestGetRule(t *testing.T) {
 	t.Run("Rule not found", func(t *testing.T) {
 		testApp := NewTestApp()
 
-		testApp.repo.On("GetRuleByResource", mock.Anything, "non-existent", []string(nil)).Return((*acmodels.AccessRule)(nil), errors.New("access rule not found"))
+		testApp.repo.On("GetRuleByResource", mock.Anything, "non-existent", []string{}).Return((*acmodels.AccessRule)(nil), errors.New("access rule not found"))
 
 		req := httptest.NewRequest("GET", "/access/rules/non-existent", nil)
 
@@ -255,7 +262,7 @@ func TestCheckAccess(t *testing.T) {
 	t.Run("Authenticated user access", func(t *testing.T) {
 		testApp := NewTestApp()
 
-		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string(nil)).Return(&acmodels.AccessRule{
+		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string{}).Return(&acmodels.AccessRule{
 			ResourceID:   "test-resource",
 			ResourceType: "file",
 			OwnerID:      "owner-123",
@@ -284,7 +291,7 @@ func TestCheckAccess(t *testing.T) {
 	t.Run("Unauthenticated user access", func(t *testing.T) {
 		testApp := NewTestApp()
 
-		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string(nil)).Return(&acmodels.AccessRule{
+		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string{}).Return(&acmodels.AccessRule{
 			ResourceID:   "test-resource",
 			ResourceType: "file",
 			OwnerID:      "owner-123",
@@ -336,7 +343,7 @@ func TestUpdateRule(t *testing.T) {
 			Whitelist:    []string{},
 		}
 
-		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string(nil)).Return(currentRule, nil)
+		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string{}).Return(currentRule, nil)
 		testApp.repo.On("IsOwner", mock.Anything, "test-resource", "user-123").Return(true, nil)
 		testApp.repo.On("UpdateRuleByResource", mock.Anything, "test-resource", mock.AnythingOfType("*models.AccessRule")).Return(nil)
 
@@ -360,15 +367,6 @@ func TestUpdateRule(t *testing.T) {
 	t.Run("Forbidden for non-owner", func(t *testing.T) {
 		testApp := NewTestApp()
 
-		currentRule := &acmodels.AccessRule{
-			ResourceID:   "test-resource",
-			ResourceType: "file",
-			OwnerID:      "owner-123",
-			AccessMode:   acmodels.AccessModePrivate,
-			Whitelist:    []string{},
-		}
-
-		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string(nil)).Return(currentRule, nil)
 		testApp.repo.On("IsOwner", mock.Anything, "test-resource", "other-user").Return(false, nil)
 
 		reqBody := `{"access_mode": "whitelist", "whitelist": ["new@example.com"]}`
@@ -388,15 +386,6 @@ func TestDeleteRule(t *testing.T) {
 	t.Run("Success with owner", func(t *testing.T) {
 		testApp := NewTestApp()
 
-		currentRule := &acmodels.AccessRule{
-			ResourceID:   "test-resource",
-			ResourceType: "file",
-			OwnerID:      "user-123",
-			AccessMode:   acmodels.AccessModePrivate,
-			Whitelist:    []string{},
-		}
-
-		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string(nil)).Return(currentRule, nil)
 		testApp.repo.On("IsOwner", mock.Anything, "test-resource", "user-123").Return(true, nil)
 		testApp.repo.On("DeleteRuleByResource", mock.Anything, "test-resource").Return(nil)
 
@@ -417,15 +406,6 @@ func TestDeleteRule(t *testing.T) {
 	t.Run("Forbidden for non-owner", func(t *testing.T) {
 		testApp := NewTestApp()
 
-		currentRule := &acmodels.AccessRule{
-			ResourceID:   "test-resource",
-			ResourceType: "file",
-			OwnerID:      "owner-123",
-			AccessMode:   acmodels.AccessModePrivate,
-			Whitelist:    []string{},
-		}
-
-		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string(nil)).Return(currentRule, nil)
 		testApp.repo.On("IsOwner", mock.Anything, "test-resource", "other-user").Return(false, nil)
 
 		req := httptest.NewRequest("DELETE", "/access/rules/test-resource", nil)
@@ -443,7 +423,7 @@ func TestAddToWhitelist(t *testing.T) {
 	t.Run("Success with owner", func(t *testing.T) {
 		testApp := NewTestApp()
 
-		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string(nil)).Return(&acmodels.AccessRule{
+		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string{}).Return(&acmodels.AccessRule{
 			ResourceID:   "test-resource",
 			ResourceType: "file",
 			OwnerID:      "user-123",
@@ -451,8 +431,8 @@ func TestAddToWhitelist(t *testing.T) {
 			Whitelist:    []string{"existing@example.com"},
 		}, nil).Once()
 		testApp.repo.On("IsOwner", mock.Anything, "test-resource", "user-123").Return(true, nil).Once()
-		testApp.repo.On("AddToWhitelist", mock.Anything, "test-resource", "new@example.com").Return(nil).Once()
-		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string(nil)).Return(&acmodels.AccessRule{
+		testApp.repo.On("UpdateRuleByResource", mock.Anything, "test-resource", mock.AnythingOfType("*models.AccessRule")).Return(nil).Once()
+		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string{}).Return(&acmodels.AccessRule{
 			ResourceID:   "test-resource",
 			ResourceType: "file",
 			OwnerID:      "user-123",
@@ -480,13 +460,6 @@ func TestAddToWhitelist(t *testing.T) {
 	t.Run("Forbidden for non-owner", func(t *testing.T) {
 		testApp := NewTestApp()
 
-		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string(nil)).Return(&acmodels.AccessRule{
-			ResourceID:   "test-resource",
-			ResourceType: "file",
-			OwnerID:      "owner-123",
-			AccessMode:   acmodels.AccessModeWhitelist,
-			Whitelist:    []string{"existing@example.com"},
-		}, nil)
 		testApp.repo.On("IsOwner", mock.Anything, "test-resource", "other-user").Return(false, nil)
 
 		reqBody := `{"resource_id": "test-resource", "user_identifier": "new@example.com"}`
@@ -506,7 +479,7 @@ func TestRemoveFromWhitelist(t *testing.T) {
 	t.Run("Success with owner", func(t *testing.T) {
 		testApp := NewTestApp()
 
-		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string(nil)).Return(&acmodels.AccessRule{
+		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string{}).Return(&acmodels.AccessRule{
 			ResourceID:   "test-resource",
 			ResourceType: "file",
 			OwnerID:      "user-123",
@@ -514,8 +487,8 @@ func TestRemoveFromWhitelist(t *testing.T) {
 			Whitelist:    []string{"remaining@example.com", "toremove@example.com"},
 		}, nil)
 		testApp.repo.On("IsOwner", mock.Anything, "test-resource", "user-123").Return(true, nil)
-		testApp.repo.On("RemoveFromWhitelist", mock.Anything, "test-resource", "toremove@example.com").Return(nil)
-		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string(nil)).Return(&acmodels.AccessRule{
+		testApp.repo.On("UpdateRuleByResource", mock.Anything, "test-resource", mock.AnythingOfType("*models.AccessRule")).Return(nil).Once()
+		testApp.repo.On("GetRuleByResource", mock.Anything, "test-resource", []string{}).Return(&acmodels.AccessRule{
 			ResourceID:   "test-resource",
 			ResourceType: "file",
 			OwnerID:      "user-123",

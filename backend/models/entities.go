@@ -61,6 +61,57 @@ func (Notification) CollectionName() string {
 	return "notifications"
 }
 
+type JobType string
+
+type JobStatus string
+
+const (
+	JobTypeEncrypt JobType = "encrypt"
+	JobTypeDecrypt JobType = "decrypt"
+)
+
+const (
+	JobStatusPending    JobStatus = "pending"
+	JobStatusProcessing JobStatus = "processing"
+	JobStatusCompleted  JobStatus = "completed"
+	JobStatusFailed     JobStatus = "failed"
+	JobStatusCancelled  JobStatus = "cancelled"
+)
+
+type JobError struct {
+	Code      string    `bson:"code" json:"code"`
+	Message   string    `bson:"message" json:"message"`
+	Timestamp time.Time `bson:"timestamp" json:"timestamp"`
+}
+
+type JobResult struct {
+	FileID       string `bson:"file_id,omitempty" json:"file_id,omitempty"`
+	Filename     string `bson:"filename,omitempty" json:"filename,omitempty"`
+	DownloadURL  string `bson:"download_url,omitempty" json:"download_url,omitempty"`
+	PreviewType  string `bson:"preview_type,omitempty" json:"preview_type,omitempty"`
+	MimeType     string `bson:"mime_type,omitempty" json:"mime_type,omitempty"`
+	ContentBase64 string `bson:"content_base64,omitempty" json:"content_base64,omitempty"`
+}
+
+type Job struct {
+	ID             primitive.ObjectID  `bson:"_id,omitempty" json:"id"`
+	UserID         string              `bson:"user_id" json:"user_id"`
+	Type           JobType             `bson:"type" json:"type"`
+	Status         JobStatus           `bson:"status" json:"status"`
+	Progress       int                 `bson:"progress" json:"progress"`
+	Filename       string              `bson:"filename,omitempty" json:"filename,omitempty"`
+	FileMetadataID *primitive.ObjectID `bson:"file_metadata_id,omitempty" json:"file_metadata_id,omitempty"`
+	Result         *JobResult          `bson:"result,omitempty" json:"result,omitempty"`
+	Error          *JobError           `bson:"error,omitempty" json:"error,omitempty"`
+	CreatedAt      time.Time           `bson:"created_at" json:"created_at"`
+	UpdatedAt      time.Time           `bson:"updated_at" json:"updated_at"`
+	CompletedAt    *time.Time          `bson:"completed_at,omitempty" json:"completed_at,omitempty"`
+}
+
+func (Job) CollectionName() string {
+	return "jobs"
+}
+
 type EncryptionType string
 
 const (

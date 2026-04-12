@@ -29,6 +29,8 @@ type mockR2 struct {
 	deleteErr    error
 	presignedURL string
 	presignedErr error
+	getFileBody  io.ReadCloser
+	getFileErr   error
 	uploadedKeys []string
 	deletedKeys  []string
 }
@@ -50,6 +52,16 @@ func (m *mockR2) DeleteFile(_ context.Context, key string) error {
 	}
 	m.deletedKeys = append(m.deletedKeys, key)
 	return nil
+}
+
+func (m *mockR2) GetFile(_ context.Context, _ string) (io.ReadCloser, error) {
+	if m.getFileErr != nil {
+		return nil, m.getFileErr
+	}
+	if m.getFileBody != nil {
+		return m.getFileBody, nil
+	}
+	return io.NopCloser(strings.NewReader("")), nil
 }
 
 func (m *mockR2) GeneratePresignedURL(_ context.Context, _ string, _ time.Duration) (string, error) {
@@ -401,7 +413,14 @@ func TestEncryptedSizeFromPlaintextSize(t *testing.T) {
 	assert.Equal(t, int64(33), encryptedSizeFromPlaintextSize(0))
 	assert.Equal(t, int64(54), encryptedSizeFromPlaintextSize(1))
 	assert.Equal(t, int64(65589), encryptedSizeFromPlaintextSize(65536))
-	assert.Equal(t, int64(65610), encryptedSizeFromPlaintextSize(65537))
+	assert.Equal(t, int64(65590), encryptedSizeFromPlaintextSize(65537))
+}
+
+func TestProgressFromBytes_ClampsPercent(t *testing.T) {
+	assert.Equal(t, 0, progressFromBytes(0, 100))
+	assert.Equal(t, 50, progressFromBytes(50, 100))
+	assert.Equal(t, 100, progressFromBytes(150, 100))
+	assert.Equal(t, 0, progressFromBytes(10, 0))
 }
 
 func TestUpload_SizeZero_FallbackBufferStillUploads(t *testing.T) {

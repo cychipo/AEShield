@@ -21,6 +21,7 @@ import (
 type R2Storage interface {
 	UploadFile(ctx context.Context, key string, body io.Reader, contentType string, size int64) error
 	DeleteFile(ctx context.Context, key string) error
+	GetFile(ctx context.Context, key string) (io.ReadCloser, error)
 	GeneratePresignedURL(ctx context.Context, key string, expiry time.Duration) (string, error)
 }
 
@@ -69,14 +70,20 @@ type Service struct {
 	fileRepo         FileRepo
 	userStorageRepo  UserStorageRepo
 	notificationRepo NotificationRepo
+	jobService       *JobService
 }
 
-func NewService(r2 R2Storage, fileRepo FileRepo, userStorageRepo UserStorageRepo, notificationRepo NotificationRepo) *Service {
+func NewService(r2 R2Storage, fileRepo FileRepo, userStorageRepo UserStorageRepo, notificationRepo NotificationRepo, jobService ...*JobService) *Service {
+	var svc *JobService
+	if len(jobService) > 0 {
+		svc = jobService[0]
+	}
 	return &Service{
 		r2:               r2,
 		fileRepo:         fileRepo,
 		userStorageRepo:  userStorageRepo,
 		notificationRepo: notificationRepo,
+		jobService:       svc,
 	}
 }
 
@@ -89,6 +96,7 @@ type UploadInput struct {
 	AccessMode     string
 	Password       string // Mật khẩu để mã hóa file (bắt buộc)
 	Body           io.Reader
+	JobID          string
 }
 
 // Upload stream mã hóa file và đẩy lên R2, lưu metadata vào MongoDB.
@@ -134,7 +142,19 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (*models.FileMe
 				pw.Close()
 			}
 		}()
-		_, encryptErr = crypto.Encrypt(pw, input.Body, input.Password, bits)
+		_, encryptErr = crypto.EncryptWithProgress(pw, input.Body, input.Password, bits, func(processedBytes int64) error {
+			if s.jobService != nil && input.JobID != "" {
+				cancelled, err := s.jobService.IsCancelled(ctx, input.JobID)
+				if err != nil {
+					return err
+				}
+				if cancelled {
+					return ErrJobCancelled
+				}
+				return s.jobService.UpdateProgress(ctx, input.JobID, progressFromBytes(processedBytes, input.Size))
+			}
+			return nil
+		})
 	}()
 
 	// Upload lên R2 cần Content-Length chính xác và body có thể đọc ổn định.
@@ -155,6 +175,9 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (*models.FileMe
 		return nil, fmt.Errorf("upload failed: %w", err)
 	}
 	log.Printf("[upload.debug] r2 upload success owner=%s filename=%q encryptedSize=%d storageKey=%q", input.OwnerID, input.Filename, encryptedSize, storageKey)
+	if s.jobService != nil && input.JobID != "" {
+		_ = s.jobService.UpdateProgress(ctx, input.JobID, 100)
+	}
 
 	// Tạo metadata
 	file := &models.FileMetadata{
