@@ -11,42 +11,54 @@ func init() {
 }
 
 type Config struct {
-	Port               string
-	FrontendURL        string
-	JWTSecret          string
-	GoogleClientID     string
-	GoogleClientSecret string
-	GoogleRedirectURL  string
-	GitHubClientID     string
-	GitHubClientSecret string
-	GitHubRedirectURL  string
-	MongoURI           string
-	MongoDatabase      string
-	R2AccountID        string
-	R2AccessKeyID      string
-	R2SecretAccessKey  string
-	R2BucketName       string
-	R2PublicURL        string
+	Port                       string
+	FrontendURL                string
+	FrontendDist               string
+	JWTSecret                  string
+	GoogleClientID             string
+	GoogleClientSecret         string
+	GoogleRedirectURL          string
+	GitHubClientID             string
+	GitHubClientSecret         string
+	GitHubRedirectURL          string
+	MongoURI                   string
+	MongoDatabase              string
+	MongoAdminUsername         string
+	MongoAdminPassword         string
+	MongoBootstrapRootUsername string
+	MongoBootstrapRootPassword string
+	MongoDeploymentMarker      string
+	R2AccountID                string
+	R2AccessKeyID              string
+	R2SecretAccessKey          string
+	R2BucketName               string
+	R2PublicURL                string
 }
 
 func Load() *Config {
 	return &Config{
-		Port:               getEnv("PORT", "6888"),
-		FrontendURL:        getEnv("FRONTEND_URL", "http://localhost:5173"),
-		JWTSecret:          getEnv("JWT_SECRET", "your-secret-key-change-in-production"),
-		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
-		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
-		GoogleRedirectURL:  getEnv("GOOGLE_REDIRECT_URL", "http://localhost:6888/api/v1/auth/google/callback"),
-		GitHubClientID:     getEnv("GITHUB_CLIENT_ID", ""),
-		GitHubClientSecret: getEnv("GITHUB_CLIENT_SECRET", ""),
-		GitHubRedirectURL:  getEnv("GITHUB_REDIRECT_URL", "http://localhost:6888/api/v1/auth/github/callback"),
-		MongoURI:           getEnv("MONGO_URI", "mongodb://localhost:27017"),
-		MongoDatabase:      getEnv("MONGO_DATABASE", "aeshield"),
-		R2AccountID:        getEnv("R2_ACCOUNT_ID", ""),
-		R2AccessKeyID:      getEnv("R2_ACCESS_KEY_ID", ""),
-		R2SecretAccessKey:  getEnv("R2_SECRET_ACCESS_KEY", ""),
-		R2BucketName:       getEnv("R2_BUCKET_NAME", ""),
-		R2PublicURL:        getEnv("R2_PUBLIC_URL", ""),
+		Port:                       getEnv("PORT", "6888"),
+		FrontendURL:                getEnv("FRONTEND_URL", "http://localhost:5173"),
+		FrontendDist:               getEnv("FRONTEND_DIST", ""),
+		JWTSecret:                  getEnv("JWT_SECRET", "your-secret-key-change-in-production"),
+		GoogleClientID:             getEnv("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret:         getEnv("GOOGLE_CLIENT_SECRET", ""),
+		GoogleRedirectURL:          getEnv("GOOGLE_REDIRECT_URL", "http://localhost:6888/api/v1/auth/google/callback"),
+		GitHubClientID:             getEnv("GITHUB_CLIENT_ID", ""),
+		GitHubClientSecret:         getEnv("GITHUB_CLIENT_SECRET", ""),
+		GitHubRedirectURL:          getEnv("GITHUB_REDIRECT_URL", "http://localhost:6888/api/v1/auth/github/callback"),
+		MongoURI:                   getEnv("MONGO_URI", "mongodb://localhost:27017"),
+		MongoDatabase:              getEnv("MONGO_DATABASE", "aeshield"),
+		MongoAdminUsername:         getEnv("MONGO_ADMIN_USERNAME", ""),
+		MongoAdminPassword:         getEnv("MONGO_ADMIN_PASSWORD", ""),
+		MongoBootstrapRootUsername: getEnv("MONGO_BOOTSTRAP_ROOT_USERNAME", ""),
+		MongoBootstrapRootPassword: getEnv("MONGO_BOOTSTRAP_ROOT_PASSWORD", ""),
+		MongoDeploymentMarker:      getEnv("MONGO_DEPLOYMENT_MARKER", "aeshield-deployment-managed"),
+		R2AccountID:                getEnv("R2_ACCOUNT_ID", ""),
+		R2AccessKeyID:              getEnv("R2_ACCESS_KEY_ID", ""),
+		R2SecretAccessKey:          getEnv("R2_SECRET_ACCESS_KEY", ""),
+		R2BucketName:               getEnv("R2_BUCKET_NAME", ""),
+		R2PublicURL:                getEnv("R2_PUBLIC_URL", ""),
 	}
 }
 

@@ -1,4 +1,4 @@
-.PHONY: dev dev_be build clean install
+.PHONY: dev dev_be build clean install run deploy deploy-down deploy-build
 
 install:
 	cd frontend && yarn install
@@ -13,6 +13,15 @@ dev:
 build:
 	cd frontend && yarn build
 	cd backend && go build -o server ./cmd/main.go
+
+deploy-build:
+	cd deploy && docker compose --env-file .env build
+
+deploy:
+	cd deploy && docker compose --env-file .env up --build -d
+
+deploy-down:
+	cd deploy && docker compose --env-file .env down
 
 clean:
 	rm -rf frontend/dist

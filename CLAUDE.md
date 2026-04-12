@@ -99,3 +99,10 @@ Các route chính được định nghĩa trong `backend/cmd/main.go`:
 - Backend unit tests tồn tại trong các package tính năng dưới `backend/internal/...`.
 - Có ít nhất một bộ backend E2E trong `backend/e2e/auth_e2e_test.go`.
 - README ở thư mục gốc đã cũ một phần: nó vẫn mô tả các lệnh theo kiểu Wails và cấu trúc dự án cũ hơn. Khi có mâu thuẫn, hãy ưu tiên `backend/` source files, `backend/TESTING.md`, `backend/Makefile`, và `AGENTS.md` khi có xung đột.
+
+## Active Technologies
+- Go backend, JavaScript React frontend, Docker-based deployment artifacts + Fiber backend, MongoDB, React, Vite, Yarn, Go toolchain (010-vps-deployment)
+- MongoDB cho dữ liệu ứng dụng; filesystem/static build artifacts cho frontend production (010-vps-deployment)
+
+## Recent Changes
+- 010-vps-deployment: Added Go backend, JavaScript React frontend, Docker-based deployment artifacts + Fiber backend, MongoDB, React, Vite, Yarn, Go toolchain

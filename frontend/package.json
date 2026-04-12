@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "build:docker": "vite build",
+    "preview": "vite preview",
+    "preview:docker": "vite preview --host 0.0.0.0 --port 5191",
+    "build:proxy": "VITE_API_URL=/api/v1 vite build"
   },
   "dependencies": {
     "argon2-browser": "^1.18.0",

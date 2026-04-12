@@ -16,7 +16,8 @@ import {
 import AppHeader from "../components/AppHeader";
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:6888/api/v1";
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? "http://localhost:6888/api/v1" : "/api/v1");
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
