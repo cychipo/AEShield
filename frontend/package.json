@@ -12,6 +12,7 @@
     "build:proxy": "VITE_API_URL=/api/v1 vite build"
   },
   "dependencies": {
+    "antd": "^6.3.5",
     "argon2-browser": "^1.18.0",
     "lucide-react": "^0.577.0",
     "react": "^18.2.0",

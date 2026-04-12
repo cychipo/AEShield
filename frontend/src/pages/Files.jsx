@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { App as AntdApp, Modal } from "antd";
 import { useNavigate } from "react-router-dom";
 import {
   Shield,
@@ -72,9 +73,34 @@ export default function Files() {
   const [selectedWhitelistUsers, setSelectedWhitelistUsers] = useState([]);
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState("");
+  const [selectedFileIds, setSelectedFileIds] = useState(new Set());
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const [batchDeleteErrors, setBatchDeleteErrors] = useState([]);
+  const [storageUsage, setStorageUsage] = useState({
+    used_bytes: 0,
+    quota_bytes: 10 * 1024 * 1024 * 1024,
+    percent_used: 0,
+  });
   const fileInputRef = useRef(null);
   const previewObjectUrlRef = useRef("");
+  const { message } = AntdApp.useApp();
   const navigate = useNavigate();
+
+  const formatStorageValue = (bytes) => {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+      return "0 KB";
+    }
+
+    if (bytes >= 1024 * 1024 * 1024) {
+      return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    }
+
+    if (bytes >= 1024 * 1024) {
+      return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    }
+
+    return `${(bytes / 1024).toFixed(2)} KB`;
+  };
 
   useEffect(() => {
     fetchUser();
@@ -106,6 +132,23 @@ export default function Files() {
       if (response.ok) {
         const userData = await response.json();
         setUser(userData);
+
+        const storageResponse = await fetch(`${API_BASE_URL}/storage/me`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (storageResponse.ok) {
+          const storageData = await storageResponse.json();
+          setStorageUsage(storageData);
+        } else if (storageResponse.status === 401) {
+          localStorage.removeItem("aeshield_token");
+          localStorage.removeItem("aeshield_user");
+          navigate("/", { replace: true });
+          return;
+        }
+
         await fetchFiles(token);
       } else {
         localStorage.removeItem("aeshield_token");
@@ -157,6 +200,10 @@ export default function Files() {
       const filesPayload = await response.json();
       setOwnedFiles(Array.isArray(filesPayload?.owned_files) ? filesPayload.owned_files : []);
       setSharedFiles(Array.isArray(filesPayload?.shared_with_me) ? filesPayload.shared_with_me : []);
+      setSelectedFileIds((prev) => {
+        const currentIds = new Set(filesPayload?.owned_files?.map((f) => f.id) || []);
+        return new Set([...prev].filter((id) => currentIds.has(id)));
+      });
     } catch (error) {
       console.error("Error fetching files:", error);
       setFilesError("Có lỗi xảy ra khi tải danh sách tệp tin.");
@@ -215,6 +262,24 @@ export default function Files() {
     }
   };
 
+  const deleteSingleFile = async (fileId, token) => {
+    const response = await fetch(`${API_BASE_URL}/files/${fileId}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    return { response, payload };
+  };
+
   const handleDelete = async (fileId, filename) => {
     const token = localStorage.getItem("aeshield_token");
     if (!token) {
@@ -222,51 +287,123 @@ export default function Files() {
       return;
     }
 
-    const confirmed = window.confirm(
-      `Bạn có chắc chắn muốn xóa tệp \"${filename}\" không?`
-    );
-    if (!confirmed) {
+    Modal.confirm({
+      title: "Xác nhận xóa tệp",
+      content: `Bạn có chắc chắn muốn xóa tệp "${filename}" không?`,
+      okText: "Xóa",
+      cancelText: "Hủy",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setFilesError("");
+        setDeletingFileId(fileId);
+
+        try {
+          const { response, payload } = await deleteSingleFile(fileId, token);
+
+          if (!response.ok) {
+            if (response.status === 401) {
+              localStorage.removeItem("aeshield_token");
+              localStorage.removeItem("aeshield_user");
+              navigate("/", { replace: true });
+              return;
+            }
+
+            const errorMessage = payload?.error || "Không thể xóa tệp tin.";
+            setFilesError(errorMessage);
+            message.error(errorMessage);
+            return;
+          }
+
+          setOwnedFiles((prevFiles) => prevFiles.filter((file) => file.id !== fileId));
+          message.success(`Đã xóa tệp "${filename}".`);
+          await fetchFiles(token);
+        } catch (error) {
+          console.error("Error deleting file:", error);
+          const errorMessage = "Có lỗi xảy ra khi xóa tệp tin.";
+          setFilesError(errorMessage);
+          message.error(errorMessage);
+        } finally {
+          setDeletingFileId("");
+        }
+      },
+    });
+  };
+
+  const handleBatchDelete = async () => {
+    const token = localStorage.getItem("aeshield_token");
+    if (!token) {
+      navigate("/", { replace: true });
       return;
     }
 
-    setFilesError("");
-    setDeletingFileId(fileId);
+    const ids = Array.from(selectedFileIds);
+    if (ids.length === 0) return;
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/files/${fileId}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+    Modal.confirm({
+      title: "Xác nhận xóa nhiều tệp",
+      content: `Bạn có chắc chắn muốn xóa ${ids.length} tệp tin đã chọn?`,
+      okText: "Xóa tất cả",
+      cancelText: "Hủy",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setOwnedFiles((prev) => prev.filter((f) => !selectedFileIds.has(f.id)));
+        setSelectedFileIds(new Set());
+        setBatchDeleting(true);
+        setBatchDeleteErrors([]);
+        setFilesError("");
 
-      let payload = null;
-      try {
-        payload = await response.json();
-      } catch {
-        payload = null;
-      }
+        try {
+          const results = await Promise.allSettled(
+            ids.map(async (fileId) => {
+              const { response, payload } = await deleteSingleFile(fileId, token);
+              if (!response.ok) {
+                const error = new Error(payload?.error || "Không thể xóa tệp tin.");
+                error.status = response.status;
+                throw error;
+              }
+              return fileId;
+            })
+          );
 
-      if (!response.ok) {
-        if (response.status === 401) {
-          localStorage.removeItem("aeshield_token");
-          localStorage.removeItem("aeshield_user");
-          navigate("/", { replace: true });
-          return;
+          const errors = [];
+          let unauthorized = false;
+
+          results.forEach((result, i) => {
+            if (result.status === "rejected") {
+              if (result.reason?.status === 401) {
+                unauthorized = true;
+              }
+              errors.push({ id: ids[i], name: `File #${i + 1}` });
+            }
+          });
+
+          if (unauthorized) {
+            localStorage.removeItem("aeshield_token");
+            localStorage.removeItem("aeshield_user");
+            navigate("/", { replace: true });
+            return;
+          }
+
+          if (errors.length > 0) {
+            setBatchDeleteErrors(errors);
+            const errorMessage = `Đã xóa ${ids.length - errors.length}/${ids.length} tệp. ${errors.length} tệp thất bại.`;
+            setFilesError(errorMessage);
+            message.warning(errorMessage);
+          } else {
+            message.success(`Đã xóa ${ids.length} tệp tin.`);
+          }
+
+          await fetchFiles(token);
+        } catch (error) {
+          console.error("Error deleting multiple files:", error);
+          const errorMessage = "Có lỗi xảy ra khi xóa nhiều tệp tin.";
+          setFilesError(errorMessage);
+          message.error(errorMessage);
+        } finally {
+          setBatchDeleting(false);
         }
-
-        setFilesError(payload?.error || "Không thể xóa tệp tin.");
-        return;
-      }
-
-      setOwnedFiles((prevFiles) => prevFiles.filter((file) => file.id !== fileId));
-      await fetchFiles(token);
-    } catch (error) {
-      console.error("Error deleting file:", error);
-      setFilesError("Có lỗi xảy ra khi xóa tệp tin.");
-    } finally {
-      setDeletingFileId("");
-    }
+      },
+    });
   };
 
   const clearPreviewObjectUrl = () => {
@@ -901,6 +1038,7 @@ export default function Files() {
         `Tải lên thành công: ${payload?.filename || selectedFile.name}`
       );
       setSelectedFile(null);
+      setSelectedFileIds(new Set());
       await fetchFiles(token);
 
       if (fileInputRef.current) {
@@ -915,6 +1053,31 @@ export default function Files() {
     }
   };
 
+  const handleToggleSelect = useCallback((fileId) => {
+    setSelectedFileIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(fileId)) {
+        next.delete(fileId);
+      } else {
+        next.add(fileId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleToggleSelectAll = useCallback((fileList) => {
+    const allSelected = fileList.every((f) => selectedFileIds.has(f.id));
+    setSelectedFileIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        fileList.forEach((f) => next.delete(f.id));
+      } else {
+        fileList.forEach((f) => next.add(f.id));
+      }
+      return next;
+    });
+  }, [selectedFileIds]);
+
   const renderFileTable = (fileList, options = {}) => {
     const {
       allowManage = false,
@@ -922,6 +1085,8 @@ export default function Files() {
       emptyDescription,
       showSharedBadge = false,
     } = options;
+
+    const tableSelectedCount = fileList.filter((f) => selectedFileIds.has(f.id)).length;
 
     if (fileList.length === 0) {
       return (
@@ -941,6 +1106,18 @@ export default function Files() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 dark:bg-slate-800/50">
               <tr>
+                {allowManage && (
+                  <th className="w-10 px-4 py-3">
+                    <input
+                      checked={tableSelectedCount > 0 && tableSelectedCount === fileList.length}
+                      className="w-4 h-4 rounded border-primary/30 text-primary focus:ring-primary cursor-pointer"
+                      disabled={batchDeleting}
+                      onChange={() => handleToggleSelectAll(fileList)}
+                      title={tableSelectedCount === fileList.length ? "Bỏ chọn tất cả" : "Chọn tất cả"}
+                      type="checkbox"
+                    />
+                  </th>
+                )}
                 <th className="text-left font-medium px-4 py-3">Tên tệp</th>
                 <th className="text-left font-medium px-4 py-3">Kích thước</th>
                 <th className="text-left font-medium px-4 py-3">Mã hóa</th>
@@ -958,12 +1135,24 @@ export default function Files() {
                 const isPreviewing = showPreview && previewingFileId === rowFileId;
                 const isInspectingEncryptedData =
                   showEncryptedData && encryptedDataFile?.id === rowFileId;
+                const isSelected = selectedFileIds.has(rowFileId);
 
                 return (
                   <tr
-                    className="border-t border-primary/10"
+                    className={`border-t border-primary/10 ${isSelected ? "bg-primary/5" : ""}`}
                     key={file.id || file.storage_path || file.filename}
                   >
+                    {allowManage && (
+                      <td className="px-4 py-3">
+                        <input
+                          checked={isSelected}
+                          className="w-4 h-4 rounded border-primary/30 text-primary focus:ring-primary cursor-pointer"
+                          disabled={batchDeleting || isDeleting}
+                          onChange={() => handleToggleSelect(rowFileId)}
+                          type="checkbox"
+                        />
+                      </td>
+                    )}
                     <td className="px-4 py-3 font-medium">
                       <div className="flex items-center gap-2">
                         <span>{file.filename}</span>
@@ -1124,21 +1313,21 @@ export default function Files() {
         </div>
         <nav className="flex-1 px-4 space-y-1">
           <a
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+            className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-primary/5 hover:text-primary dark:hover:bg-primary/10 dark:hover:text-primary transition-colors"
             href="/dashboard"
           >
             <LayoutDashboard size={20} />
             <span>Dashboard</span>
           </a>
           <a
-            className="flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary font-medium"
+            className="flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary font-medium hover:bg-primary/20 hover:text-primary dark:hover:bg-primary/25 dark:hover:text-primary hover:shadow-sm transition-all"
             href="/files"
           >
             <FolderOpen size={20} />
             <span>Tệp tin</span>
           </a>
           <a
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+            className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-primary/5 hover:text-primary dark:hover:bg-primary/10 dark:hover:text-primary transition-colors"
             href="/settings"
           >
             <Settings size={20} />
@@ -1153,11 +1342,11 @@ export default function Files() {
             <div className="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full mb-2">
               <div
                 className="bg-primary h-1.5 rounded-full"
-                style={{ width: "64%" }}
+                style={{ width: `${Math.min(storageUsage.percent_used || 0, 100)}%` }}
               ></div>
             </div>
             <p className="text-xs text-slate-600 dark:text-slate-400">
-              64.2 GB / 100 GB đã sử dụng
+              {formatStorageValue(storageUsage.used_bytes)} / {formatStorageValue(storageUsage.quota_bytes)} đã sử dụng
             </p>
           </div>
         </div>
@@ -1322,6 +1511,29 @@ export default function Files() {
                         Các tệp bạn đã tải lên và có toàn quyền quản lý.
                       </p>
                     </div>
+                    {selectedFileIds.size > 0 && (
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm text-slate-500 dark:text-slate-400">
+                          {selectedFileIds.size} tệp đã chọn
+                        </span>
+                        <button
+                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-red-300 text-red-600 text-sm font-medium hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                          disabled={batchDeleting}
+                          onClick={handleBatchDelete}
+                          type="button"
+                        >
+                          <Trash2 size={14} />
+                          {batchDeleting ? "Đang xóa..." : "Xóa đã chọn"}
+                        </button>
+                        <button
+                          className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 text-sm font-medium hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+                          onClick={() => setSelectedFileIds(new Set())}
+                          type="button"
+                        >
+                          Bỏ chọn
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {ownedFiles.length === 0 ? (

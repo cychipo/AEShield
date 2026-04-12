@@ -15,7 +15,28 @@ const API_BASE_URL =
 export default function Settings() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [storageUsage, setStorageUsage] = useState({
+    used_bytes: 0,
+    quota_bytes: 10 * 1024 * 1024 * 1024,
+    percent_used: 0,
+  });
   const navigate = useNavigate();
+
+  const formatStorageValue = (bytes) => {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+      return "0 KB";
+    }
+
+    if (bytes >= 1024 * 1024 * 1024) {
+      return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    }
+
+    if (bytes >= 1024 * 1024) {
+      return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    }
+
+    return `${(bytes / 1024).toFixed(2)} KB`;
+  };
 
   useEffect(() => {
     fetchUser();
@@ -39,6 +60,22 @@ export default function Settings() {
       if (response.ok) {
         const userData = await response.json();
         setUser(userData);
+
+        const storageResponse = await fetch(`${API_BASE_URL}/storage/me`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (storageResponse.ok) {
+          const storageData = await storageResponse.json();
+          setStorageUsage(storageData);
+        } else if (storageResponse.status === 401) {
+          localStorage.removeItem("aeshield_token");
+          localStorage.removeItem("aeshield_user");
+          navigate("/", { replace: true });
+          return;
+        }
       } else {
         localStorage.removeItem("aeshield_token");
         localStorage.removeItem("aeshield_user");
@@ -84,21 +121,21 @@ export default function Settings() {
         </div>
         <nav className="flex-1 px-4 space-y-1">
           <a
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+            className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-primary/5 hover:text-primary dark:hover:bg-primary/10 dark:hover:text-primary transition-colors"
             href="/dashboard"
           >
             <LayoutDashboard size={20} />
             <span>Dashboard</span>
           </a>
           <a
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+            className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-primary/5 hover:text-primary dark:hover:bg-primary/10 dark:hover:text-primary transition-colors"
             href="/files"
           >
             <FolderOpen size={20} />
             <span>Tệp tin</span>
           </a>
           <a
-            className="flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary font-medium"
+            className="flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary font-medium hover:bg-primary/20 hover:text-primary dark:hover:bg-primary/25 dark:hover:text-primary hover:shadow-sm transition-all"
             href="/settings"
           >
             <SettingsIcon size={20} />
@@ -113,11 +150,11 @@ export default function Settings() {
             <div className="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full mb-2">
               <div
                 className="bg-primary h-1.5 rounded-full"
-                style={{ width: "64%" }}
+                style={{ width: `${Math.min(storageUsage.percent_used || 0, 100)}%` }}
               ></div>
             </div>
             <p className="text-xs text-slate-600 dark:text-slate-400">
-              64.2 GB / 100 GB đã sử dụng
+              {formatStorageValue(storageUsage.used_bytes)} / {formatStorageValue(storageUsage.quota_bytes)} đã sử dụng
             </p>
           </div>
         </div>
