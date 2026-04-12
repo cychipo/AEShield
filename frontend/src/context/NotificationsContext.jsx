@@ -2,7 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { useNavigate } from "react-router-dom";
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:6888/api/v1";
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? "http://localhost:6888/api/v1" : "/api/v1");
 
 const NotificationsContext = createContext(null);
 

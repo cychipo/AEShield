@@ -12,3 +12,6 @@ frontend/.env
 frontend/.env.local
 
 backend/tmp/*
+deploy/.env
+deploy/.env.local
+scripts/mongo/.tmp/

@@ -26,7 +26,7 @@ func main() {
 
 	// Get project root directory
 	// Ưu tiên env var FRONTEND_DIST nếu được set
-	frontendDist := os.Getenv("FRONTEND_DIST")
+	frontendDist := cfg.FrontendDist
 	if frontendDist == "" {
 		// Fallback: dùng working directory (go run chạy từ thư mục backend)
 		wd, _ := os.Getwd()
